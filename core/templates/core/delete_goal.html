@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Delete Goal - LifeGrid</title>
+</head>
+
+<body>
+
+    <h1>Delete Goal</h1>
+
+    <p>
+        Are you sure you want to delete
+        <strong>{{ goal.title }}</strong>?
+    </p>
+
+    <form method="post">
+        {% csrf_token %}
+
+        <button type="submit">
+            Yes, Delete
+        </button>
+    </form>
+
+    <p>
+        <a href="{% url 'goal_detail' goal.id %}">
+            Cancel
+        </a>
+    </p>
+
+</body>
+
+</html>

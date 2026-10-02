@@ -1,0 +1,85 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <link rel="stylesheet" href="{% static 'core/css/style.css' %}">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>{% block title %}LifeGrid{% endblock %}</title>
+</head>
+
+<body>
+
+    <div class="app">
+
+        <aside class="sidebar">
+
+            <div class="brand">
+                LifeGrid
+            </div>
+
+            {% if user.is_authenticated %}
+
+            <nav class="nav">
+
+                <a href="{% url 'dashboard' %}">
+                    Dashboard
+                </a>
+
+                <a href="{% url 'calendar' %}">
+                    Calendar
+                </a>
+
+                <a href="{% url 'create_goal' %}">
+                    + New Goal
+                </a>
+
+            </nav>
+
+            <div class="sidebar-bottom">
+
+                <span>
+                    {{ user.username }}
+                </span>
+
+                <form method="post" action="{% url 'logout' %}">
+                    {% csrf_token %}
+                    <button type="submit">
+                        Logout
+                    </button>
+                </form>
+
+            </div>
+
+            {% else %}
+
+            <nav class="nav">
+                <a href="{% url 'login' %}">
+                    Login
+                </a>
+
+                <a href="{% url 'register' %}">
+                    Register
+                </a>
+            </nav>
+
+            {% endif %}
+
+        </aside>
+
+
+        <main class="main">
+
+            {% block content %}
+            {% endblock %}
+
+        </main>
+
+    </div>
+
+</body>
+
+</html>

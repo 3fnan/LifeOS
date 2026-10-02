@@ -1,0 +1,139 @@
+{% extends "core/base.html" %}
+
+{% block title %}
+Create Goal - LifeGrid
+{% endblock %}
+
+{% block content %}
+
+<div class="form-page">
+
+    <div class="form-card">
+
+        <div class="form-header">
+            <h1>Create a New Goal</h1>
+
+            <p>
+                Define something you want to achieve and give yourself
+                a clear timeline.
+            </p>
+        </div>
+
+        <form method="post" class="goal-form">
+
+            {% csrf_token %}
+
+            {% if form.non_field_errors %}
+            <div class="form-errors">
+                {{ form.non_field_errors }}
+            </div>
+            {% endif %}
+
+            <div class="form-field">
+
+                <label for="{{ form.title.id_for_label }}">
+                    Goal title
+                </label>
+
+                {{ form.title }}
+
+                {% if form.title.errors %}
+                <div class="field-error">
+                    {{ form.title.errors }}
+                </div>
+                {% endif %}
+
+            </div>
+
+
+            <div class="form-field">
+
+                <label for="{{ form.goal_type.id_for_label }}">
+                    Goal type
+                </label>
+
+                {{ form.goal_type }}
+
+                {% if form.goal_type.errors %}
+                <div class="field-error">
+                    {{ form.goal_type.errors }}
+                </div>
+                {% endif %}
+
+            </div>
+
+
+            <div class="date-grid">
+
+                <div class="form-field">
+
+                    <label for="{{ form.start_date.id_for_label }}">
+                        Start date
+                    </label>
+
+                    {{ form.start_date }}
+
+                    {% if form.start_date.errors %}
+                    <div class="field-error">
+                        {{ form.start_date.errors }}
+                    </div>
+                    {% endif %}
+
+                </div>
+
+
+                <div class="form-field">
+
+                    <label for="{{ form.target_date.id_for_label }}">
+                        Target date
+                    </label>
+
+                    {{ form.target_date }}
+
+                    {% if form.target_date.errors %}
+                    <div class="field-error">
+                        {{ form.target_date.errors }}
+                    </div>
+                    {% endif %}
+
+                </div>
+
+            </div>
+
+
+            <div class="form-field">
+
+                <label for="{{ form.status.id_for_label }}">
+                    Status
+                </label>
+
+                {{ form.status }}
+
+                {% if form.status.errors %}
+                <div class="field-error">
+                    {{ form.status.errors }}
+                </div>
+                {% endif %}
+
+            </div>
+
+
+            <div class="form-actions">
+
+                <a href="{% url 'dashboard' %}" class="button button-secondary">
+                    Cancel
+                </a>
+
+                <button type="submit" class="button">
+                    Create Goal
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+{% endblock %}

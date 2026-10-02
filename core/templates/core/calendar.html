@@ -1,0 +1,112 @@
+{% extends "core/base.html" %}
+
+{% block title %}
+Calendar - LifeGrid
+{% endblock %}
+
+{% block content %}
+
+<div class="calendar-page">
+
+    <div class="page-header">
+
+        <div>
+            <span class="form-eyebrow">SCHEDULE</span>
+
+            <h1>Calendar</h1>
+
+            <p>
+                {{ start_date|date:"M d, Y" }}
+                –
+                {{ end_date|date:"M d, Y" }}
+            </p>
+        </div>
+
+        <div class="calendar-navigation">
+
+            <a href="?week={{ previous_week|date:'Y-m-d' }}" class="button button-secondary">
+                ← Previous Week
+            </a>
+
+            <a href="{% url 'calendar' %}" class="button">
+                This Week
+            </a>
+
+            <a href="?week={{ next_week|date:'Y-m-d' }}" class="button button-secondary">
+                Next Week →
+            </a>
+
+        </div>
+
+    </div>
+
+
+    <div class="calendar-grid">
+
+        {% for day in days %}
+
+        <div class="calendar-day {% if day.is_today %}today{% endif %}">
+
+            <div class="calendar-day-header">
+                <strong>
+                    {{ day.date|date:"D" }}
+                </strong>
+
+                <span>
+                    {{ day.date|date:"M d" }}
+                </span>
+            </div>
+
+            <div class="calendar-schedules">
+
+                {% for schedule in day.schedules %}
+
+                <div class="calendar-event {% if schedule.task.status == 'completed' %}completed{% endif %}">
+
+                    <a href="{% url 'edit_schedule' schedule.id %}" class="calendar-event-link">
+                        <span class="calendar-event-time">
+                            {{ schedule.start_time|time:"g:i A" }}
+                        </span>
+
+                        <strong>
+                            {{ schedule.task.title }}
+                        </strong>
+
+                        <span class="calendar-event-duration">
+                            {{ schedule.duration_minutes }} min
+                        </span>
+                    </a>
+
+                    <form method="post" action="{% url 'toggle_task' schedule.task.id %}?from=calendar">
+                        {% csrf_token %}
+
+                        <button type="submit" class="calendar-complete">
+                            {% if schedule.task.status == "completed" %}
+                            Undo
+                            {% else %}
+                            Complete
+                            {% endif %}
+                        </button>
+                    </form>
+
+                </div>
+
+                {% empty %}
+
+                <p class="calendar-empty">
+                    No tasks
+                </p>
+
+                {% endfor %}
+
+            </div>
+
+        </div>
+
+        {% endfor %}
+
+    </div>
+
+</div>
+
+{% endblock %}

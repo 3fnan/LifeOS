@@ -1,0 +1,238 @@
+{% extends "core/base.html" %}
+
+{% block title %}
+Dashboard - LifeGrid
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+
+    <div>
+        <h1>Your Dashboard</h1>
+        <p>Turn your goals into actionable progress.</p>
+    </div>
+
+    <a href="{% url 'create_goal' %}" class="button">
+        + New Goal
+    </a>
+
+</div>
+
+
+<section>
+
+    <section class="today-section">
+
+        <div class="section-header">
+            <div>
+                <span class="form-eyebrow">TODAY</span>
+                <h2>Today's Plan</h2>
+                <p>Here's what you have scheduled for today.</p>
+            </div>
+        </div>
+
+        <div class="today-list">
+
+            {% for schedule in today_schedules %}
+
+            <div class="today-item">
+
+                <div class="today-time">
+                    <strong>{{ schedule.start_time }}</strong>
+                    <span>{{ schedule.end_time }}</span>
+                </div>
+
+                <div class="today-task">
+                    <strong>{{ schedule.task.title }}</strong>
+
+                    <span>
+                        {{ schedule.task.checkpoint.milestone.roadmap.goal.title }}
+                    </span>
+                </div>
+
+                <div class="today-duration">
+                    {{ schedule.duration_minutes }} min
+                </div>
+
+                <a href="{% url 'goal_detail' schedule.task.checkpoint.milestone.roadmap.goal.id %}"
+                    class="button button-small">
+                    View
+                </a>
+
+                <form method="post" action="{% url 'toggle_task' schedule.task.id %}?from=dashboard">
+                    {% csrf_token %}
+
+                    <button type="submit" class="button button-small">
+                        {% if schedule.task.status == "completed" %}
+                        Undo
+                        {% else %}
+                        Complete
+                        {% endif %}
+                    </button>
+                </form>
+
+            </div>
+
+            {% empty %}
+
+            <div class="empty-state">
+                <h3>Nothing scheduled today</h3>
+                <p>Your schedule is clear. Enjoy the breathing room.</p>
+            </div>
+
+            {% endfor %}
+
+            {% if total_today %}
+            <div class="today-progress">
+
+                <div class="today-progress-header">
+                    <div>
+                        <span class="form-eyebrow">PROGRESS</span>
+                        <h3>Today's Progress</h3>
+                    </div>
+
+                    <strong>{{ progress }}%</strong>
+                </div>
+
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: {{ progress }}%;"></div>
+                </div>
+
+                <div class="today-progress-stats">
+
+                    <span>
+                        {{ completed_today }} of {{ total_today }} tasks completed
+                    </span>
+
+                    <span>
+                        {{ completed_minutes }} of {{ total_minutes }} minutes
+                    </span>
+
+                </div>
+
+            </div>
+            {% endif %}
+        </div>
+
+        {% if upcoming_schedules %}
+
+        <section class="upcoming-section">
+
+            <div class="section-header">
+                <div>
+                    <span class="form-eyebrow">UP NEXT</span>
+                    <h2>Upcoming</h2>
+                    <p>Here's what's coming up.</p>
+                </div>
+
+                <a href="{% url 'calendar' %}" class="button button-secondary">
+                    View Calendar
+                </a>
+            </div>
+
+            <div class="upcoming-list">
+
+                {% for schedule in upcoming_schedules %}
+
+                <div class="upcoming-item">
+
+                    <div class="upcoming-date">
+                        <strong>
+                            {{ schedule.date|date:"M d" }}
+                        </strong>
+
+                        <span>
+                            {{ schedule.start_time|time:"g:i A" }}
+                        </span>
+                    </div>
+
+                    <div class="upcoming-task">
+
+                        <strong>
+                            {{ schedule.task.title }}
+                        </strong>
+
+                        <span>
+                            {{ schedule.task.checkpoint.milestone.roadmap.goal.title }}
+                        </span>
+
+                    </div>
+
+                    <div class="upcoming-duration">
+                        {{ schedule.duration_minutes }} min
+                    </div>
+
+                    <a href="{% url 'goal_detail' schedule.task.checkpoint.milestone.roadmap.goal.id %}"
+                        class="button button-small">
+                        View
+                    </a>
+
+                </div>
+
+                {% endfor %}
+
+            </div>
+
+        </section>
+
+        {% endif %}
+
+    </section>
+
+    <h2>Your Goals</h2>
+
+    {% if goals %}
+
+    <div class="goal-grid">
+
+        {% for goal in goals %}
+
+        <article class="goal-card">
+
+            <h3>
+                <a href="{% url 'goal_detail' goal.id %}">
+                    {{ goal.title }}
+                </a>
+            </h3>
+
+            <span class="status">
+                {{ goal.get_status_display }}
+            </span>
+
+            <p>
+                Target:
+                {{ goal.target_date }}
+            </p>
+
+            <a href="{% url 'goal_detail' goal.id %}" class="button">
+                View Goal
+            </a>
+
+        </article>
+
+        {% endfor %}
+
+    </div>
+
+    {% else %}
+
+    <div class="empty-state">
+
+        <h3>No goals yet</h3>
+
+        <p>
+            Start by creating your first goal.
+        </p>
+
+        <a href="{% url 'create_goal' %}" class="button">
+            Create Goal
+        </a>
+
+    </div>
+
+    {% endif %}
+
+</section>
+
+{% endblock %}
