@@ -92,11 +92,13 @@ manage.py             Django management entry point
 These steps assume Python is installed and that commands are run from the cloned project directory.
 
 ```powershell
-git clone <your-repository-url>
+git clone -b web50/projects/2020/x/capstone https://github.com/me50/3fnan.git LifeOS
 cd LifeOS
 py -m venv venv
 .\venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+python manage.py migrate
+python manage.py runserver
 ```
 
 On macOS or Linux, activate the virtual environment with `source venv/bin/activate` instead.
