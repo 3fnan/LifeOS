@@ -23,6 +23,12 @@ Create Goal - LifeGrid
 
             {% csrf_token %}
 
+            {% if form.errors %}
+            <div class="form-errors">
+                {{ form.errors }}
+            </div>
+            {% endif %}
+
             {% if form.non_field_errors %}
             <div class="form-errors">
                 {{ form.non_field_errors }}
@@ -46,21 +52,39 @@ Create Goal - LifeGrid
             </div>
 
 
+
             <div class="form-field">
-
-                <label for="{{ form.goal_type.id_for_label }}">
-                    Goal type
-                </label>
-
-                {{ form.goal_type }}
-
-                {% if form.goal_type.errors %}
-                <div class="field-error">
-                    {{ form.goal_type.errors }}
-                </div>
+                <label for="{{ form.category.id_for_label }}">Category</label>
+                {{ form.category }}
+                {% if form.category.errors %}
+                <div class="field-error">{{ form.category.errors }}</div>
                 {% endif %}
-
             </div>
+
+            <div class="form-field">
+                <label for="{{ form.priority.id_for_label }}">Priority</label>
+                {{ form.priority }}
+                {% if form.priority.errors %}
+                <div class="field-error">{{ form.priority.errors }}</div>
+                {% endif %}
+            </div>
+
+            <div class="form-field">
+                <label for="{{ form.days_per_week.id_for_label }}">Days per week</label>
+                {{ form.days_per_week }}
+                {% if form.days_per_week.errors %}
+                <div class="field-error">{{ form.days_per_week.errors }}</div>
+                {% endif %}
+            </div>
+
+            <div class="form-field">
+                <label for="{{ form.hours_per_day.id_for_label }}">Hours per day</label>
+                {{ form.hours_per_day }}
+                {% if form.hours_per_day.errors %}
+                <div class="field-error">{{ form.hours_per_day.errors }}</div>
+                {% endif %}
+            </div>
+
 
 
             <div class="date-grid">

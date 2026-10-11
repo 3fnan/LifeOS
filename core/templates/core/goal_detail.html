@@ -18,21 +18,21 @@
             <h1>{{ goal.title }}</h1>
 
             <p>
-                {{ goal.get_goal_type_display }}
+                {{ goal.get_category_display }}
                 · Target {{ goal.target_date }}
             </p>
 
             <div class="goal-progress">
                 <div class="progress-label">
                     <span>Overall Progress</span>
-                    <strong>{{ progress }}%</strong>
+                    <strong class="goal-progress-value">{{ progress }}%</strong>
                 </div>
 
                 <div class="progress-bar">
-                    <div class="progress-fill" style="width: {{ progress }}%;"></div>
+                    <div class="progress-fill goal-progress-fill" style="width: {{ progress }}%;"></div>
                 </div>
 
-                <small>
+                <small class="goal-progress-count">
                     {{ completed_tasks }} of {{ total_tasks }} tasks completed
                 </small>
             </div>
@@ -66,11 +66,16 @@
             </div>
 
             <div class="section-actions">
+
                 <a href="{% url 'edit_roadmap' roadmap.id %}" class="button">
                     Edit Roadmap
                 </a>
-            </div>
 
+                <a href="{% url 'delete_roadmap' roadmap.id %}" class="button button-danger">
+                    Delete Roadmap
+                </a>
+
+            </div>
         </div>
 
 
@@ -113,27 +118,40 @@
 
 
                 <div class="milestone-actions">
+
+                    <a href="{% url 'create_checkpoint' milestone.id %}" class="button button-small">
+                        + Add Checkpoint
+                    </a>
+
                     <a href="{% url 'edit_milestone' milestone.id %}" class="button button-small">
                         Edit Milestone
                     </a>
+
+                    <a href="{% url 'delete_milestone' milestone.id %}" class="button button-small button-danger">
+                        Delete
+                    </a>
+
                 </div>
 
 
                 <div class="progress-info">
 
                     <div class="progress-label">
-                        <span>
+                        <span class="milestone-progress-count">
                             {{ milestone.completed_tasks }}
                             /
                             {{ milestone.total_tasks }}
                             tasks completed
                         </span>
 
-                        <strong>{{ milestone.progress }}%</strong>
+                        <strong class="milestone-progress-value">
+                            {{ milestone.progress }}%
+                        </strong>
                     </div>
 
                     <div class="progress-bar">
-                        <div class="progress-fill" style="width: {{ milestone.progress }}%;"></div>
+                        <div class="progress-fill milestone-progress-fill" style="width: {{ milestone.progress }}%;">
+                        </div>
                     </div>
 
                 </div>
@@ -150,16 +168,33 @@
                             <div class="checkpoint-header">
 
                                 <div class="checkpoint-title">
-                                    <strong>{{ checkpoint.title }}</strong>
+
+                                    <strong>
+                                        {{ checkpoint.title }}
+                                    </strong>
 
                                     <span class="status">
                                         {{ checkpoint.get_status_display }}
                                     </span>
+
                                 </div>
 
-                                <a href="{% url 'edit_checkpoint' checkpoint.id %}" class="button button-small">
-                                    Edit
-                                </a>
+                                <div class="checkpoint-actions">
+
+                                    <a href="{% url 'create_task' checkpoint.id %}" class="button button-small">
+                                        + Add Task
+                                    </a>
+
+                                    <a href="{% url 'edit_checkpoint' checkpoint.id %}" class="button button-small">
+                                        Edit
+                                    </a>
+
+                                    <a href="{% url 'delete_checkpoint' checkpoint.id %}"
+                                        class="button button-small button-danger">
+                                        Delete
+                                    </a>
+
+                                </div>
 
                             </div>
 
@@ -174,7 +209,7 @@
 
                             {% for task in checkpoint.tasks.all %}
 
-                            <div class="task-item">
+                            <div class="task-item" data-task-id="{{ task.id }}">
 
                                 <div class="task-main">
 
@@ -189,7 +224,8 @@
                                     {% endif %}
 
                                     <div>
-                                        <strong class="{% if task.status == 'completed' %}task-completed{% endif %}">
+                                        <strong
+                                            class="task-title {% if task.status == 'completed' %}task-completed{% endif %}">
                                             {{ task.title }}
                                         </strong>
 
@@ -211,28 +247,29 @@
                                             </span>
 
                                             <span class="schedule-time">
-                                                🕐 {{ schedule.start_time }} – {{ schedule.end_time }}
-                                            </span>
-
-                                            <span class="status">
-                                                {{ schedule.get_status_display }}
+                                                🕐 {{ schedule.start_time|time:"H:i" }} –
+                                                {{ schedule.end_time|time:"H:i" }}
                                             </span>
                                         </div>
 
-                                        <div class="schedule-actions">
+                                        <div class="schedule-footer">
+                                            <span class="status">
+                                                {{ schedule.get_status_display }}
+                                            </span>
 
-                                            <a href="{% url 'edit_schedule' schedule.id %}" class="schedule-action">
-                                                Edit
-                                            </a>
+                                            <div class="schedule-actions">
+                                                <a href="{% url 'edit_schedule' schedule.id %}" class="schedule-action">
+                                                    Edit
+                                                </a>
 
-                                            <form method="post" action="{% url 'delete_schedule' schedule.id %}">
-                                                {% csrf_token %}
+                                                <form method="post" action="{% url 'delete_schedule' schedule.id %}">
+                                                    {% csrf_token %}
 
-                                                <button type="submit" class="schedule-remove">
-                                                    Remove
-                                                </button>
-                                            </form>
-
+                                                    <button type="submit" class="schedule-remove">
+                                                        Remove
+                                                    </button>
+                                                </form>
+                                            </div>
                                         </div>
 
                                     </div>
@@ -252,9 +289,13 @@
                                         Schedule
                                     </a>
 
+                                    <a href="{% url 'delete_task' task.id %}" class="button button-small button-danger">
+                                        Delete
+                                    </a>
+
                                     <form method="post" action="{% url 'toggle_task' task.id %}">
                                         {% csrf_token %}
-                                        <button type="submit" class="task-button">
+                                        <button type="submit" class="task-button complete-task-btn">
                                             {% if task.status == "completed" %}
                                             Undo
                                             {% else %}
@@ -292,12 +333,13 @@
 
             {% empty %}
 
-            <div class="empty-state">
-                <h3>No milestones yet</h3>
-                <p>
-                    This roadmap doesn't have any milestones.
-                </p>
-            </div>
+            <p class="empty-text">
+                No milestones yet. Add your first milestone to start building this roadmap.
+            </p>
+
+            <a href="{% url 'create_milestone' roadmap.id %}" class="button">
+                + Add Milestone
+            </a>
 
             {% endfor %}
 
@@ -305,16 +347,23 @@
 
     </section>
 
+
     {% else %}
 
     <div class="empty-state">
         <h2>No roadmap yet</h2>
+
         <p>
             This goal doesn't have a roadmap yet.
         </p>
+
+        <a href="{% url 'create_roadmap' goal.id %}" class="button">
+            + Create Roadmap
+        </a>
     </div>
 
     {% endif %}
+
 
 
     <div class="goal-footer">

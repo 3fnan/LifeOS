@@ -1,7 +1,7 @@
 from core.views import edit_checkpoint
 from django.urls import path
 from .views import dashboard,register,create_goal,goal_detail,edit_goal,delete_goal,toggle_task, edit_roadmap,edit_milestone,toggle_task,edit_task,schedule_task,delete_schedule, calendar_view
-from .views import edit_schedule
+from .views import edit_schedule, create_milestone,create_roadmap,delete_task,create_checkpoint,create_task, delete_roadmap, delete_checkpoint, delete_milestone
 urlpatterns = [
     path("", dashboard, name="dashboard"),
     path("register/",register,name="register"),
@@ -18,5 +18,12 @@ urlpatterns = [
     path("schedule/<int:schedule_id>/delete/",delete_schedule,name="delete_schedule"),
     path("calendar/",calendar_view,name="calendar"),
     path("schedules/<int:schedule_id>/edit/",edit_schedule,name="edit_schedule"),
-
+    path("roadmaps/<int:roadmap_id>/milestones/create/",create_milestone,name="create_milestone"),
+    path("goals/<int:goal_id>/roadmap/create/",create_roadmap,name="create_roadmap"),
+    path("milestones/<int:milestone_id>/checkpoints/create/",create_checkpoint,name="create_checkpoint"),
+    path("checkpoints/<int:checkpoint_id>/tasks/create/",create_task,name="create_task"),
+    path("roadmaps/<int:roadmap_id>/delete/",delete_roadmap,name="delete_roadmap"),
+    path("milestones/<int:milestone_id>/delete/",delete_milestone,name="delete_milestone"),
+    path("checkpoints/<int:checkpoint_id>/delete/",delete_checkpoint,name="delete_checkpoint"),
+    path("tasks/<int:task_id>/delete/",delete_task,name="delete_task"),
 ]

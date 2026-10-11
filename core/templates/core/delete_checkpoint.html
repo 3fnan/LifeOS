@@ -1,0 +1,51 @@
+{% extends "core/base.html" %}
+
+{% block title %}
+Delete Task - LifeGrid
+{% endblock %}
+
+{% block content %}
+
+<div class="form-page">
+
+    <div class="form-card">
+
+        <div class="form-header">
+
+            <span class="eyebrow">
+                DELETE TASK
+            </span>
+
+            <h1>
+                Delete "{{ task.title }}"?
+            </h1>
+
+            <p>
+                This action cannot be undone.
+            </p>
+
+        </div>
+
+        <form method="post">
+
+            {% csrf_token %}
+
+            <div class="form-actions">
+
+                <a href="{% url 'goal_detail' goal.id %}" class="button button-secondary">
+                    Cancel
+                </a>
+
+                <button type="submit" class="button button-danger">
+                    Delete Task
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+{% endblock %}

@@ -7,25 +7,23 @@ class GoalForm(forms.ModelForm):
         model = Goal
         fields = [
             "title",
-            "goal_type",
+            "category",
+            "priority",
+            "days_per_week",
+            "hours_per_day",
             "start_date",
             "target_date",
             "status",
         ]
 
         widgets = {
-            "title": forms.TextInput(
-                attrs={
-                    "placeholder": "e.g. Become a Django Backend Developer"
-                }
-            ),
-            "goal_type": forms.Select(),
-            "start_date": forms.DateInput(
-                attrs={"type": "date"}
-            ),
-            "target_date": forms.DateInput(
-                attrs={"type": "date"}
-            ),
+            "title": forms.TextInput(attrs={"placeholder": "e.g. Become a Django Backend Developer"}),
+            "category": forms.Select(),
+            "priority": forms.Select(),
+            "days_per_week": forms.NumberInput(attrs={"placeholder": "e.g. 5","min": 1,"max": 7,}),
+            "hours_per_day": forms.NumberInput(attrs={"placeholder": "e.g. 2","min": 0.1,"max": 24,"step": 0.1,}),
+            "start_date": forms.DateInput(attrs={"type": "date"}),
+            "target_date": forms.DateInput(attrs={"type": "date"}),
             "status": forms.Select(),
         }
 

@@ -1,3 +1,4 @@
+```django
 {% extends "core/base.html" %}
 
 {% block title %}
@@ -5,72 +6,57 @@ Calendar - LifeGrid
 {% endblock %}
 
 {% block content %}
-
 <div class="calendar-page">
 
-    <div class="page-header">
-
+    <div class="page-header calendar-page-header">
         <div>
-            <span class="form-eyebrow">SCHEDULE</span>
-
+            <span class="form-eyebrow">YOUR SCHEDULE</span>
             <h1>Calendar</h1>
-
-            <p>
+            <p class="calendar-date-range">
                 {{ start_date|date:"M d, Y" }}
-                –
-                {{ end_date|date:"M d, Y" }}
+                – {{ end_date|date:"M d, Y" }}
             </p>
         </div>
 
         <div class="calendar-navigation">
-
             <a href="?week={{ previous_week|date:'Y-m-d' }}" class="button button-secondary">
-                ← Previous Week
+                ← Previous
             </a>
 
             <a href="{% url 'calendar' %}" class="button">
-                This Week
+                Today
             </a>
 
             <a href="?week={{ next_week|date:'Y-m-d' }}" class="button button-secondary">
-                Next Week →
+                Next →
             </a>
-
         </div>
-
     </div>
 
-
-    <div class="calendar-grid">
+    <!-- Desktop: seven-column weekly grid -->
+    <div class="calendar-grid calendar-desktop">
 
         {% for day in days %}
+        <section class="calendar-day {% if day.is_today %}today{% endif %}">
 
-        <div class="calendar-day {% if day.is_today %}today{% endif %}">
-
-            <div class="calendar-day-header">
-                <strong>
-                    {{ day.date|date:"D" }}
-                </strong>
-
-                <span>
-                    {{ day.date|date:"M d" }}
-                </span>
-            </div>
+            <header class="calendar-day-header">
+                <strong>{{ day.date|date:"D" }}</strong>
+                <span>{{ day.date|date:"M d" }}</span>
+                {% if day.is_today %}
+                <span class="calendar-today-label">Today</span>
+                {% endif %}
+            </header>
 
             <div class="calendar-schedules">
-
                 {% for schedule in day.schedules %}
-
-                <div class="calendar-event {% if schedule.task.status == 'completed' %}completed{% endif %}">
+                <article class="calendar-event {% if schedule.task.status == 'completed' %}completed{% endif %}">
 
                     <a href="{% url 'edit_schedule' schedule.id %}" class="calendar-event-link">
                         <span class="calendar-event-time">
                             {{ schedule.start_time|time:"g:i A" }}
                         </span>
 
-                        <strong>
-                            {{ schedule.task.title }}
-                        </strong>
+                        <strong>{{ schedule.task.title }}</strong>
 
                         <span class="calendar-event-duration">
                             {{ schedule.duration_minutes }} min
@@ -79,7 +65,6 @@ Calendar - LifeGrid
 
                     <form method="post" action="{% url 'toggle_task' schedule.task.id %}?from=calendar">
                         {% csrf_token %}
-
                         <button type="submit" class="calendar-complete">
                             {% if schedule.task.status == "completed" %}
                             Undo
@@ -88,25 +73,78 @@ Calendar - LifeGrid
                             {% endif %}
                         </button>
                     </form>
+                </article>
+                {% empty %}
+                <p class="calendar-empty">No tasks scheduled</p>
+                {% endfor %}
+            </div>
+        </section>
+        {% endfor %}
 
+    </div>
+
+    <!-- Mobile: vertical day-by-day agenda -->
+    <div class="calendar-agenda">
+
+        {% for day in days %}
+        <section class="agenda-day {% if day.is_today %}today{% endif %}">
+
+            <header class="agenda-day-header">
+                <div>
+                    <h2>{{ day.date|date:"l" }}</h2>
+                    <p>{{ day.date|date:"M d, Y" }}</p>
                 </div>
 
+                {% if day.is_today %}
+                <span class="calendar-today-label">Today</span>
+                {% endif %}
+            </header>
+
+            <div class="agenda-schedules">
+                {% for schedule in day.schedules %}
+                <article class="agenda-event {% if schedule.task.status == 'completed' %}completed{% endif %}">
+
+                    <div class="agenda-event-time">
+                        {{ schedule.start_time|time:"g:i A" }}
+                    </div>
+
+                    <div class="agenda-event-details">
+                        <a href="{% url 'edit_schedule' schedule.id %}" class="agenda-event-title">
+                            {{ schedule.task.title }}
+                        </a>
+
+                        <span class="calendar-event-duration">
+                            {{ schedule.duration_minutes }} min
+                        </span>
+
+                        <div class="agenda-event-actions">
+                            <a href="{% url 'edit_schedule' schedule.id %}"
+                                class="button button-secondary button-small">
+                                Edit
+                            </a>
+
+                            <form method="post" action="{% url 'toggle_task' schedule.task.id %}?from=calendar">
+                                {% csrf_token %}
+                                <button type="submit" class="calendar-complete">
+                                    {% if schedule.task.status == "completed" %}
+                                    Undo
+                                    {% else %}
+                                    Complete
+                                    {% endif %}
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </article>
                 {% empty %}
-
-                <p class="calendar-empty">
-                    No tasks
-                </p>
-
+                <p class="calendar-empty">Nothing scheduled for this day.</p>
                 {% endfor %}
-
             </div>
-
-        </div>
-
+        </section>
         {% endfor %}
 
     </div>
 
 </div>
-
 {% endblock %}
+```

@@ -39,8 +39,9 @@ Dashboard - LifeGrid
             <div class="today-item">
 
                 <div class="today-time">
-                    <strong>{{ schedule.start_time }}</strong>
-                    <span>{{ schedule.end_time }}</span>
+                    <strong>{{ schedule.start_time|time:"H:i" }}</strong>
+                    <span>to</span>
+                    <strong>{{ schedule.end_time|time:"H:i"}}</strong>
                 </div>
 
                 <div class="today-task">

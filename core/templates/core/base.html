@@ -9,6 +9,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <title>{% block title %}LifeGrid{% endblock %}</title>
+    <link rel="icon" type="image/svg+xml" href="{% static 'core/favicon.svg' %}">
 </head>
 
 <body>
@@ -25,18 +26,20 @@
 
             <nav class="nav">
 
-                <a href="{% url 'dashboard' %}">
+                <a class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}nav-link--active{% endif %}"
+                    href="{% url 'dashboard' %}">
                     Dashboard
                 </a>
 
-                <a href="{% url 'calendar' %}">
+                <a class="nav-link {% if request.resolver_match.url_name == 'calendar' %}nav-link--active{% endif %}"
+                    href="{% url 'calendar' %}">
                     Calendar
                 </a>
 
-                <a href="{% url 'create_goal' %}">
+                <a class="nav-link {% if request.resolver_match.url_name == 'create_goal' %}nav-link--active{% endif %}"
+                    href="{% url 'create_goal' %}">
                     + New Goal
                 </a>
-
             </nav>
 
             <div class="sidebar-bottom">
@@ -56,12 +59,14 @@
 
             {% else %}
 
-            <nav class="nav">
-                <a href="{% url 'login' %}">
+            <nav class="nav auth-nav">
+                <a class="nav-link {% if request.resolver_match.url_name == 'login' %}nav-link--active{% endif %}"
+                    href="{% url 'login' %}">
                     Login
                 </a>
 
-                <a href="{% url 'register' %}">
+                <a class="nav-link {% if request.resolver_match.url_name == 'register' %}nav-link--active{% endif %}"
+                    href="{% url 'register' %}">
                     Register
                 </a>
             </nav>
@@ -79,7 +84,8 @@
         </main>
 
     </div>
-
+    {% load static %}
+    <script src="{% static 'core/js/app.js' %}"></script>
 </body>
 
 </html>
