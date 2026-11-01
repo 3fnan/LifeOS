@@ -1,737 +1,491 @@
-from django.contrib.auth.decorators import login_required
-from django.contrib.auth.forms import UserCreationForm
-from django.shortcuts import render,redirect,get_object_or_404
-from django.views.decorators.http import require_POST
-from django.utils import timezone
-from django.http import JsonResponse
-from .models import Goal, Task, Roadmap, Milestone, Checkpoint, Schedule
-from .forms import GoalForm, RoadmapForm, MilestoneForm, CheckpointForm, TaskForm, ScheduleForm
 from datetime import timedelta
 
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.forms import UserCreationForm
+from django.db.models import Count, Prefetch, Q
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils import timezone
+from django.views.decorators.http import require_POST
+
+from .forms import GoalForm, PhaseForm, StepForm, TaskForm, TimeBlockForm
+from .models import Goal, Phase, Step, Task, TimeBlock
+
+# Ownership lookups: every object is reached through its goal's user.
+TASK_OWNER = "step__phase__goal__user"
+BLOCK_OWNER = "task__step__phase__goal__user"
+
+
+def owned_blocks(user):
+    return TimeBlock.objects.filter(**{BLOCK_OWNER: user}).select_related("task__step__phase__goal")
+
+
+def form_page(request, form, *, eyebrow, title, submit, cancel_url, description="", context=None):
+    """Render the shared create/edit page."""
+    page = {
+        "form": form,
+        "eyebrow": eyebrow,
+        "title": title,
+        "description": description,
+        "submit": submit,
+        "cancel_url": cancel_url,
+    }
+    page.update(context or {})
+    return render(request, "core/form_page.html", page)
+
+
+def confirm_delete(request, obj, *, kind, warning, cancel_url):
+    return render(request, "core/confirm_delete.html", {
+        "object": obj,
+        "kind": kind,
+        "warning": warning,
+        "cancel_url": cancel_url,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Accounts and overview pages
+# ---------------------------------------------------------------------------
 def register(request):
     if request.method == "POST":
         form = UserCreationForm(request.POST)
-
         if form.is_valid():
             form.save()
+            messages.success(request, "Account created. Log in to start planning.")
             return redirect("login")
-
     else:
-        form=UserCreationForm()
+        form = UserCreationForm()
+    return render(request, "core/registration/registration.html", {"form": form})
 
-    return render(request,"core/registration/registration.html",{"form":form})   
+
+def goals_with_progress(user):
+    goals = list(
+        Goal.objects.filter(user=user)
+        .annotate(
+            task_count=Count("phases__steps__tasks"),
+            done_count=Count("phases__steps__tasks", filter=Q(phases__steps__tasks__status=Task.DONE)),
+        )
+        .order_by("status", "target_date")
+    )
+    for goal in goals:
+        goal.progress = round(goal.done_count / goal.task_count * 100) if goal.task_count else 0
+    return goals
+
+
+@login_required
+def goal_list(request):
+    return render(request, "core/goal_list.html", {"goals": goals_with_progress(request.user)})
+
 
 @login_required
 def dashboard(request):
-    goals = Goal.objects.filter(user=request.user)
-
     today = timezone.localdate()
-
-    today_schedules = Schedule.objects.filter(
-        date=today,
-        task__checkpoint__milestone__roadmap__goal__user=request.user
-    ).order_by("start_time")
-
-    upcoming_schedules = Schedule.objects.filter(
-        date__gt=today,
-        task__checkpoint__milestone__roadmap__goal__user=request.user
-    ).order_by("date", "start_time")[:5]
-
-    total_today = today_schedules.count()
-
-    completed_today = today_schedules.filter(
-        task__status="completed"
-    ).count()
-
-    total_minutes = sum(
-        schedule.duration_minutes
-        for schedule in today_schedules
-    )
-
-    completed_minutes = sum(
-        schedule.duration_minutes
-        for schedule in today_schedules
-        if schedule.task.status == "completed"
-    )
-
-    progress = 0
-
-    if total_today:
-        progress = round(
-            (completed_today / total_today) * 100
-        )
-
-    return render(
-        request,
-        "core/dashboard.html",
-        {
-            "goals": goals,
-            "today_schedules": today_schedules,
-            "upcoming_schedules": upcoming_schedules,
-            "total_today": total_today,
-            "completed_today": completed_today,
-            "total_minutes": total_minutes,
-            "completed_minutes": completed_minutes,
-            "progress": progress,
-        },
-    )
-
-@login_required
-def create_goal(request):
-    if request.method == "POST":
-        form = GoalForm(request.POST)
-
-        if form.is_valid():
-            goal = form.save(commit=False)
-            goal.user = request.user
-            goal.save()
-
-            return redirect("dashboard")
-    else:
-        form = GoalForm()
-
-    return render(
-        request,
-        "core/create_goal.html",
-        {"form": form}
-    )
-
-
-@login_required
-def goal_detail(request, goal_id):
-    goal = get_object_or_404(
-        Goal,
-        id=goal_id,
-        user=request.user
-    )
-
-    roadmap = getattr(goal, "roadmap", None)
-
-    tasks = Task.objects.filter(
-        checkpoint__milestone__roadmap__goal=goal
-    )
-
-    total_tasks = tasks.count()
-    completed_tasks = tasks.filter(
-        status="completed"
-    ).count()
-
-    if total_tasks > 0:
-        progress = round(
-            (completed_tasks / total_tasks) * 100
-        )
-    else:
-        progress = 0
-
-    return render(
-        request,
-        "core/goal_detail.html",
-        {
-            "goal": goal,
-            "roadmap": roadmap,
-            "total_tasks": total_tasks,
-            "completed_tasks": completed_tasks,
-            "progress": progress,
-        }
-    )
-
-@login_required
-@require_POST
-def toggle_task(request, task_id):
-    task = get_object_or_404(
-        Task,
-        id=task_id,
-        checkpoint__milestone__roadmap__goal__user=request.user
-    )
-
-    if task.status == "completed":
-        task.status = "pending"
-        task.completed_at = None
-    else:
-        task.status = "completed"
-        task.completed_at = timezone.now()
-
-    task.save()
-        
-    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-        return JsonResponse({
-            "success": True,
-            "status": task.status,
-            })
-
-    if request.GET.get("from") == "dashboard":
-        return redirect("dashboard")
-    
-    if request.GET.get("from") == "calendar":
-        return redirect("calendar")
-
-    return redirect(
-        "goal_detail",
-        goal_id=task.checkpoint.milestone.roadmap.goal.id
-    )
-
-@login_required
-def edit_goal(request, goal_id):
-    goal = get_object_or_404(
-        Goal,
-        id=goal_id,
-        user=request.user
-    )
-
-    if request.method == "POST":
-        form = GoalForm(request.POST, instance=goal)
-
-        if form.is_valid():
-            form.save()
-            return redirect("goal_detail", goal_id=goal.id)
-
-    else:
-        form = GoalForm(instance=goal)
-
-    return render(
-        request,
-        "core/edit_goal.html",
-        {"form": form, "goal": goal}
-    )
-
-
-@login_required
-def create_roadmap(request, goal_id):
-
-    goal = get_object_or_404(
-        Goal,
-        id=goal_id,
-        user=request.user
-    )
-
-    if hasattr(goal, "roadmap"):
-        return redirect(
-            "goal_detail",
-            goal_id=goal.id
-        )
-
-    if request.method == "POST":
-        form = RoadmapForm(request.POST)
-
-        if form.is_valid():
-            roadmap = form.save(commit=False)
-            roadmap.goal = goal
-            roadmap.save()
-            return redirect(
-                "goal_detail",
-                goal_id=goal.id
-            )
-
-    else:
-        form = RoadmapForm()
-
-    return render(
-        request,
-        "core/create_roadmap.html",
-        {
-            "form": form,
-            "goal": goal,
-        }
-    )
-
-@login_required
-def edit_roadmap(request, roadmap_id):
-    roadmap = get_object_or_404(
-        Roadmap,
-        id=roadmap_id,
-        goal__user=request.user
-    )
-
-    if request.method == "POST":
-        form = RoadmapForm(
-            request.POST,
-            instance=roadmap
-        )
-
-        if form.is_valid():
-            form.save()
-
-            return redirect(
-                "goal_detail",
-                goal_id=roadmap.goal.id
-            )
-
-    else:
-        form = RoadmapForm(instance=roadmap)
-
-    return render(
-        request,
-        "core/edit_roadmap.html",
-        {
-            "form": form,
-            "roadmap": roadmap,
-        }
-    )
-
-@login_required
-def delete_roadmap(request, roadmap_id):
-
-    roadmap = get_object_or_404(
-        Roadmap,
-        id=roadmap_id,
-        goal__user=request.user
-    )
-
-    goal_id = roadmap.goal.id
-
-    if request.method == "POST":
-        roadmap.delete()
-        return redirect("goal_detail", goal_id=goal_id)
-
-    return render(
-        request,
-        "core/delete_roadmap.html",
-        {
-            "roadmap": roadmap,
-            "goal": roadmap.goal,
-        }
-    )
-
-@login_required
-def delete_goal(request, goal_id):
-    goal = get_object_or_404(
-        Goal,
-        id=goal_id,
-        user=request.user
-    )
-
-    if request.method == "POST":
-        goal.delete()
-        return redirect("dashboard")
-
-    return render(
-        request,
-        "core/delete_goal.html",
-        {"goal": goal}
-    )
-
-@login_required
-def create_milestone(request, roadmap_id):
-
-    roadmap = get_object_or_404(
-        Roadmap,
-        id=roadmap_id,
-        goal__user=request.user
-    )
-
-    if request.method == "POST":
-
-        form = MilestoneForm(request.POST)
-
-        if form.is_valid():
-
-            milestone = form.save(commit=False)
-            milestone.roadmap = roadmap
-            milestone.save()
-
-            return redirect(
-                "goal_detail",
-                goal_id=roadmap.goal.id
-            )
-
-    else:
-
-        next_order = roadmap.milestones.count() + 1
-
-        form = MilestoneForm(
-            initial={"order": next_order}
-        )
-
-    return render(
-        request,
-        "core/create_milestone.html",
-        {
-            "form": form,
-            "roadmap": roadmap,
-        }
-    )
-
-@login_required
-def edit_milestone(request, milestone_id):
-
-    milestone = get_object_or_404(
-        Milestone,
-        id=milestone_id,
-        roadmap__goal__user=request.user
-    )
-
-    if request.method == "POST":
-
-        form = MilestoneForm(
-            request.POST,
-            instance=milestone
-        )
-
-        if form.is_valid():
-
-            form.save()
-
-            return redirect(
-                "goal_detail",
-                goal_id=milestone.roadmap.goal.id
-            )
-
-    else:
-
-        form = MilestoneForm(
-            instance=milestone
-        )
-
-    return render(
-        request,
-        "core/edit_milestone.html",
-        {
-            "form": form,
-            "milestone": milestone,
-        }
-    )
-
-@login_required
-def delete_milestone(request, milestone_id):
-
-    milestone = get_object_or_404(
-        Milestone,
-        id=milestone_id,
-        roadmap__goal__user=request.user
-    )
-
-    goal_id = milestone.roadmap.goal.id
-
-    if request.method == "POST":
-        milestone.delete()
-        return redirect("goal_detail", goal_id=goal_id)
-
-    return render(
-        request,
-        "core/delete_milestone.html",
-        {
-            "milestone": milestone,
-            "goal": milestone.roadmap.goal,
-        }
-    )
-
-
-@login_required
-def create_checkpoint(request, milestone_id):
-
-    milestone = get_object_or_404(
-        Milestone,
-        id=milestone_id,
-        roadmap__goal__user=request.user
-    )
-
-    if request.method == "POST":
-
-        form = CheckpointForm(request.POST)
-
-        if form.is_valid():
-
-            checkpoint = form.save(commit=False)
-            checkpoint.milestone = milestone
-            checkpoint.save()
-
-            return redirect(
-                "goal_detail",
-                goal_id=milestone.roadmap.goal.id
-            )
-
-    else:
-
-        next_order = milestone.checkpoints.count() + 1
-
-        form = CheckpointForm(
-            initial={
-                "order": next_order
-            }
-        )
-
-    return render(
-        request,
-        "core/create_checkpoint.html",
-        {
-            "form": form,
-            "milestone": milestone,
-        }
-    )
-
-@login_required
-def edit_checkpoint(request, checkpoint_id):
-    checkpoint = get_object_or_404(
-        Checkpoint,
-        id=checkpoint_id,
-        milestone__roadmap__goal__user=request.user
-    )
-
-    if request.method == "POST":
-        form = CheckpointForm(
-            request.POST,
-            instance=checkpoint
-        )
-
-        if form.is_valid():
-            form.save()
-
-            return redirect(
-                "goal_detail",
-                goal_id=checkpoint.milestone.roadmap.goal.id
-            )
-
-    else:
-        form = CheckpointForm(instance=checkpoint)
-
-    return render(
-        request,
-        "core/edit_checkpoint.html",
-        {
-            "form": form,
-            "checkpoint": checkpoint,
-        }
-    )
-
-@login_required
-def delete_checkpoint(request, checkpoint_id):
-
-    checkpoint = get_object_or_404(
-        Checkpoint,
-        id=checkpoint_id,
-        milestone__roadmap__goal__user=request.user
-    )
-
-    goal_id = checkpoint.milestone.roadmap.goal.id
-
-    if request.method == "POST":
-        checkpoint.delete()
-        return redirect("goal_detail", goal_id=goal_id)
-
-    return render(
-        request,
-        "core/delete_checkpoint.html",
-        {
-            "checkpoint": checkpoint,
-            "goal": checkpoint.milestone.roadmap.goal,
-        }
-    )
-
-@login_required
-def create_task(request, checkpoint_id):
-
-    checkpoint = get_object_or_404(
-        Checkpoint,
-        id=checkpoint_id,
-        milestone__roadmap__goal__user=request.user
-    )
-
-    if request.method == "POST":
-
-        form = TaskForm(request.POST)
-
-        if form.is_valid():
-
-            task = form.save(commit=False)
-            task.checkpoint = checkpoint
-            task.save()
-
-            return redirect(
-                "goal_detail",
-                goal_id=checkpoint.milestone.roadmap.goal.id
-            )
-
-    else:
-
-        form = TaskForm()
-
-    return render(
-        request,
-        "core/create_task.html",
-        {
-            "form": form,
-            "checkpoint": checkpoint,
-        }
-    )
-
-@login_required
-def edit_task(request, task_id):
-    task = get_object_or_404(
-        Task,
-        id=task_id,
-        checkpoint__milestone__roadmap__goal__user=request.user
-    )
-
-    if request.method == "POST":
-        form = TaskForm(request.POST, instance=task)
-
-        if form.is_valid():
-            form.save()
-
-            return redirect(
-                "goal_detail",
-                goal_id=task.checkpoint.milestone.roadmap.goal.id
-            )
-
-    else:
-        form = TaskForm(instance=task)
-
-    return render(
-        request,
-        "core/edit_task.html",
-        {
-            "form": form,
-            "task": task,
-        }
-    )
-
-@login_required
-def delete_task(request, task_id):
-
-    task = get_object_or_404(
-        Task,
-        id=task_id,
-        checkpoint__milestone__roadmap__goal__user=request.user
-    )
-
-    goal_id = task.checkpoint.milestone.roadmap.goal.id
-
-    if request.method == "POST":
-        task.delete()
-        return redirect("goal_detail", goal_id=goal_id)
-
-    return render(
-        request,
-        "core/delete_task.html",
-        {
-            "task": task,
-            "goal": task.checkpoint.milestone.roadmap.goal,
-        }
-    )
-
-@login_required
-def schedule_task(request, task_id):
-    task = get_object_or_404(
-        Task,
-        id=task_id,
-        checkpoint__milestone__roadmap__goal__user=request.user
-    )
-
-    if request.method == "POST":
-        form = ScheduleForm(request.POST, task=task)
-
-        if form.is_valid():
-            schedule = form.save(commit=False)
-            schedule.task = task
-            schedule.save()
-
-            return redirect(
-                "goal_detail",
-                goal_id=task.checkpoint.milestone.roadmap.goal.id
-            )
-
-    else:
-        form = ScheduleForm(task=task)
-
-    return render(
-        request,
-        "core/schedule_task.html",
-        {
-            "form": form,
-            "task": task,
-        }
-    )
-
-@login_required
-@require_POST
-def delete_schedule(request, schedule_id):
-    schedule = get_object_or_404(
-        Schedule,
-        id=schedule_id,
-        task__checkpoint__milestone__roadmap__goal__user=request.user
-    )
-
-    goal_id = schedule.task.checkpoint.milestone.roadmap.goal.id
-
-    schedule.delete()
-
-    return redirect("goal_detail", goal_id=goal_id)
+    goals = goals_with_progress(request.user)
+
+    blocks = owned_blocks(request.user)
+    today_blocks = list(blocks.filter(date=today).order_by("start_time"))
+    upcoming_blocks = blocks.filter(date__gt=today).order_by("date", "start_time")[:5]
+
+    completed_today = sum(1 for b in today_blocks if b.task.status == Task.DONE)
+    total_minutes = sum(b.duration_minutes for b in today_blocks)
+    completed_minutes = sum(b.duration_minutes for b in today_blocks if b.task.status == Task.DONE)
+
+    hour = timezone.localtime().hour
+    greeting = "Good morning" if hour < 12 else "Good afternoon" if hour < 17 else "Good evening"
+
+    return render(request, "core/dashboard.html", {
+        "greeting": greeting,
+        "today": today,
+        "active_goals": sum(1 for goal in goals if goal.status == "active"),
+        "goals": goals,
+        "today_schedules": today_blocks,
+        "upcoming_schedules": upcoming_blocks,
+        "total_today": len(today_blocks),
+        "completed_today": completed_today,
+        "total_minutes": total_minutes,
+        "completed_minutes": completed_minutes,
+        "progress": round(completed_today / len(today_blocks) * 100) if today_blocks else 0,
+    })
 
 
 @login_required
 def calendar_view(request):
     today = timezone.localdate()
+    current_monday = today - timedelta(days=today.weekday())
 
+    # Weeks always run Monday to Sunday: any ?week= date snaps to its Monday.
+    # Unparseable dates, or dates too close to date.min/date.max to build a
+    # previous/next week, fall back to the current week instead of a 500.
+    start_date = current_monday
     week_start = request.GET.get("week")
-
     if week_start:
         try:
-            start_date = timezone.datetime.strptime(
-                week_start,
-                "%Y-%m-%d"
-            ).date()
-        except ValueError:
-            start_date = today - timedelta(days=today.weekday())
-    else:
-        start_date = today - timedelta(days=today.weekday())
+            requested = timezone.datetime.strptime(week_start, "%Y-%m-%d").date()
+            monday = requested - timedelta(days=requested.weekday())
+            # Raises OverflowError if prev/next week would leave the date range.
+            monday - timedelta(days=7)
+            monday + timedelta(days=13)
+            start_date = monday
+        except (ValueError, OverflowError):
+            pass
 
     end_date = start_date + timedelta(days=6)
+    blocks = owned_blocks(request.user).filter(date__range=[start_date, end_date]).order_by("date", "start_time")
 
-    schedules = Schedule.objects.filter(
-        date__range=[start_date, end_date],
-        task__checkpoint__milestone__roadmap__goal__user=request.user
-    ).order_by("date", "start_time")
+    by_date = {}
+    for block in blocks:
+        by_date.setdefault(block.date, []).append(block)
 
     days = []
-
     for i in range(7):
         date = start_date + timedelta(days=i)
-
+        day_blocks = by_date.get(date, [])
         days.append({
             "date": date,
-            "schedules": schedules.filter(date=date),
+            "schedules": day_blocks,
+            "minutes": sum(b.duration_minutes for b in day_blocks),
             "is_today": date == today,
         })
 
-    previous_week = start_date - timedelta(days=7)
-    next_week = start_date + timedelta(days=7)
+    return render(request, "core/calendar.html", {
+        "days": days,
+        "start_date": start_date,
+        "end_date": end_date,
+        "previous_week": start_date - timedelta(days=7),
+        "next_week": start_date + timedelta(days=7),
+        "is_current_week": start_date == current_monday,
+        "week_minutes": sum(day["minutes"] for day in days),
+        "week_blocks": sum(len(day["schedules"]) for day in days),
+    })
 
-    return render(
-        request,
-        "core/calendar.html",
-        {
-            "days": days,
-            "start_date": start_date,
-            "end_date": end_date,
-            "previous_week": previous_week,
-            "next_week": next_week,
+
+# ---------------------------------------------------------------------------
+# Goals
+# ---------------------------------------------------------------------------
+@login_required
+def create_goal(request):
+    if request.method == "POST":
+        form = GoalForm(request.POST)
+        if form.is_valid():
+            goal = form.save(commit=False)
+            goal.user = request.user
+            goal.save()
+            messages.success(request, "Goal created. Now break it into phases.")
+            return redirect("goal_detail", goal_id=goal.id)
+    else:
+        today = timezone.localdate()
+        form = GoalForm(initial={"start_date": today, "days_per_week": 5, "hours_per_day": 1})
+    return form_page(
+        request, form, eyebrow="Today", title="Set a new goal",
+        description="Give it a clear finish line and a realistic weekly time budget.",
+        submit="Create goal", cancel_url=reverse("dashboard"),
+    )
+
+
+@login_required
+def goal_detail(request, goal_id):
+    tasks = Task.objects.prefetch_related(
+        Prefetch("blocks", queryset=TimeBlock.objects.order_by("date", "start_time"))
+    )
+    goal = get_object_or_404(
+        Goal.objects.prefetch_related(
+            Prefetch("phases__steps__tasks", queryset=tasks)
+        ),
+        id=goal_id,
+        user=request.user,
+    )
+    phases = goal.phases.all()
+    all_tasks = [task for phase in phases for task in phase.all_tasks()]
+    total_tasks = len(all_tasks)
+    completed_tasks = sum(1 for task in all_tasks if task.status == Task.DONE)
+
+    return render(request, "core/goal_detail.html", {
+        "goal": goal,
+        "phases": phases,
+        "total_tasks": total_tasks,
+        "completed_tasks": completed_tasks,
+        "progress": round(completed_tasks / total_tasks * 100) if total_tasks else 0,
+    })
+
+
+@login_required
+def edit_goal(request, goal_id):
+    goal = get_object_or_404(Goal, id=goal_id, user=request.user)
+    if request.method == "POST":
+        form = GoalForm(request.POST, instance=goal)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Goal updated.")
+            return redirect("goal_detail", goal_id=goal.id)
+    else:
+        form = GoalForm(instance=goal)
+    return form_page(
+        request, form, eyebrow=goal.title, title="Edit goal",
+        submit="Save changes", cancel_url=reverse("goal_detail", args=[goal.id]),
+    )
+
+
+@login_required
+def delete_goal(request, goal_id):
+    goal = get_object_or_404(Goal, id=goal_id, user=request.user)
+    if request.method == "POST":
+        goal.delete()
+        messages.success(request, f"Deleted “{goal.title}”.")
+        return redirect("dashboard")
+    return confirm_delete(
+        request, goal, kind="goal",
+        warning="This also deletes all of its phases, steps, tasks and time blocks.",
+        cancel_url=reverse("goal_detail", args=[goal.id]),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phases
+# ---------------------------------------------------------------------------
+@login_required
+def create_phase(request, goal_id):
+    goal = get_object_or_404(Goal, id=goal_id, user=request.user)
+    if request.method == "POST":
+        form = PhaseForm(request.POST)
+        if form.is_valid():
+            phase = form.save(commit=False)
+            phase.goal = goal
+            phase.save()
+            messages.success(request, "Phase added.")
+            return redirect("goal_detail", goal_id=goal.id)
+    else:
+        form = PhaseForm(initial={"order": goal.phases.count() + 1})
+    return form_page(
+        request, form, eyebrow=goal.title, title="Add a phase",
+        description="Phases are the big stages of your goal, like chapters.",
+        submit="Add phase", cancel_url=reverse("goal_detail", args=[goal.id]),
+    )
+
+
+@login_required
+def edit_phase(request, phase_id):
+    phase = get_object_or_404(Phase, id=phase_id, goal__user=request.user)
+    if request.method == "POST":
+        form = PhaseForm(request.POST, instance=phase)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Phase updated.")
+            return redirect("goal_detail", goal_id=phase.goal_id)
+    else:
+        form = PhaseForm(instance=phase)
+    return form_page(
+        request, form, eyebrow=phase.goal.title, title="Edit phase",
+        submit="Save changes", cancel_url=reverse("goal_detail", args=[phase.goal_id]),
+    )
+
+
+@login_required
+def delete_phase(request, phase_id):
+    phase = get_object_or_404(Phase, id=phase_id, goal__user=request.user)
+    if request.method == "POST":
+        phase.delete()
+        messages.success(request, f"Deleted phase “{phase.title}”.")
+        return redirect("goal_detail", goal_id=phase.goal_id)
+    return confirm_delete(
+        request, phase, kind="phase",
+        warning="This also deletes its steps, tasks and time blocks.",
+        cancel_url=reverse("goal_detail", args=[phase.goal_id]),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Steps
+# ---------------------------------------------------------------------------
+@login_required
+def create_step(request, phase_id):
+    phase = get_object_or_404(Phase, id=phase_id, goal__user=request.user)
+    if request.method == "POST":
+        form = StepForm(request.POST)
+        if form.is_valid():
+            step = form.save(commit=False)
+            step.phase = phase
+            step.save()
+            messages.success(request, "Step added.")
+            return redirect("goal_detail", goal_id=phase.goal_id)
+    else:
+        form = StepForm(initial={"order": phase.steps.count() + 1})
+    return form_page(
+        request, form, eyebrow=phase.goal.title, title="Add a step",
+        description="Steps are concrete outcomes inside a phase.",
+        submit="Add step", cancel_url=reverse("goal_detail", args=[phase.goal_id]),
+    )
+
+
+@login_required
+def edit_step(request, step_id):
+    step = get_object_or_404(Step, id=step_id, phase__goal__user=request.user)
+    goal_id = step.phase.goal_id
+    if request.method == "POST":
+        form = StepForm(request.POST, instance=step)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Step updated.")
+            return redirect("goal_detail", goal_id=goal_id)
+    else:
+        form = StepForm(instance=step)
+    return form_page(
+        request, form, eyebrow=step.phase.goal.title, title="Edit step",
+        submit="Save changes", cancel_url=reverse("goal_detail", args=[goal_id]),
+    )
+
+
+@login_required
+def delete_step(request, step_id):
+    step = get_object_or_404(Step, id=step_id, phase__goal__user=request.user)
+    goal_id = step.phase.goal_id
+    if request.method == "POST":
+        step.delete()
+        messages.success(request, f"Deleted step “{step.title}”.")
+        return redirect("goal_detail", goal_id=goal_id)
+    return confirm_delete(
+        request, step, kind="step",
+        warning="This also deletes its tasks and time blocks.",
+        cancel_url=reverse("goal_detail", args=[goal_id]),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tasks
+# ---------------------------------------------------------------------------
+@login_required
+def create_task(request, step_id):
+    step = get_object_or_404(Step, id=step_id, phase__goal__user=request.user)
+    goal_id = step.phase.goal_id
+    if request.method == "POST":
+        form = TaskForm(request.POST)
+        if form.is_valid():
+            task = form.save(commit=False)
+            task.step = step
+            task.save()
+            messages.success(request, "Task added.")
+            if request.POST.get("then") == "schedule":
+                return redirect("schedule_task", task_id=task.id)
+            return redirect("goal_detail", goal_id=goal_id)
+    else:
+        form = TaskForm()
+    return form_page(
+        request, form, eyebrow=step.phase.goal.title, title="Add a task",
+        description="Tasks are the small actions you can actually put on your calendar.",
+        submit="Add task", cancel_url=reverse("goal_detail", args=[goal_id]),
+        context={"secondary_submit": ("schedule", "Add & schedule")},
+    )
+
+
+@login_required
+def edit_task(request, task_id):
+    task = get_object_or_404(Task, id=task_id, **{TASK_OWNER: request.user})
+    goal_id = task.goal.id
+    if request.method == "POST":
+        form = TaskForm(request.POST, instance=task)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Task updated.")
+            return redirect("goal_detail", goal_id=goal_id)
+    else:
+        form = TaskForm(instance=task)
+    return form_page(
+        request, form, eyebrow=task.goal.title, title="Edit task",
+        submit="Save changes", cancel_url=reverse("goal_detail", args=[goal_id]),
+    )
+
+
+@login_required
+def delete_task(request, task_id):
+    task = get_object_or_404(Task, id=task_id, **{TASK_OWNER: request.user})
+    goal_id = task.goal.id
+    if request.method == "POST":
+        task.delete()
+        messages.success(request, f"Deleted task “{task.title}”.")
+        return redirect("goal_detail", goal_id=goal_id)
+    return confirm_delete(
+        request, task, kind="task",
+        warning="This also deletes its time blocks.",
+        cancel_url=reverse("goal_detail", args=[goal_id]),
+    )
+
+
+@login_required
+@require_POST
+def toggle_task(request, task_id):
+    task = get_object_or_404(Task, id=task_id, **{TASK_OWNER: request.user})
+    task.status = Task.TODO if task.status == Task.DONE else Task.DONE
+    task.save()
+
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse({"success": True, "status": task.status})
+
+    if request.GET.get("from") == "dashboard":
+        return redirect("dashboard")
+    if request.GET.get("from") == "calendar":
+        return redirect("calendar")
+    return redirect("goal_detail", goal_id=task.goal.id)
+
+
+# ---------------------------------------------------------------------------
+# Time blocks
+# ---------------------------------------------------------------------------
+def time_block_page(request, form, task, *, title, submit, cancel_url, crumb):
+    goal = task.goal
+    return form_page(
+        request, form, eyebrow=crumb, title=title,
+        description="Pick when you'll work on this task.",
+        submit=submit, cancel_url=cancel_url,
+        context={
+            "task": task,
+            "plan_hint": f"Plan for “{goal.title}”: {goal.hours_per_day.normalize():f}h a day, "
+                         f"{goal.days_per_week} days a week.",
         },
     )
 
 
 @login_required
-def edit_schedule(request, schedule_id):
-    schedule = get_object_or_404(
-        Schedule,
-        id=schedule_id,
-        task__checkpoint__milestone__roadmap__goal__user=request.user
+def schedule_task(request, task_id):
+    task = get_object_or_404(Task, id=task_id, **{TASK_OWNER: request.user})
+    if request.method == "POST":
+        form = TimeBlockForm(request.POST, task=task)
+        if form.is_valid():
+            block = form.save(commit=False)
+            block.task = task
+            block.save()
+            messages.success(request, f"Scheduled for {block.date:%a %b %d}, {block.start_time:%H:%M}.")
+            return redirect("goal_detail", goal_id=task.goal.id)
+    else:
+        form = TimeBlockForm(task=task, initial={"date": timezone.localdate()})
+    return time_block_page(
+        request, form, task, title="Schedule task", submit="Schedule", crumb=task.goal.title,
+        cancel_url=reverse("goal_detail", args=[task.goal.id]),
     )
 
-    if request.method == "POST":
-        form = ScheduleForm(request.POST, instance=schedule, task=schedule.task)
 
+@login_required
+def edit_block(request, block_id):
+    block = get_object_or_404(TimeBlock, id=block_id, **{BLOCK_OWNER: request.user})
+    if request.method == "POST":
+        form = TimeBlockForm(request.POST, instance=block, task=block.task)
         if form.is_valid():
             form.save()
-
-            return redirect("calendar")
+            messages.success(request, "Time block updated.")
+            return redirect(f"{reverse('calendar')}?week={block.date:%Y-%m-%d}")
     else:
-        form = ScheduleForm(instance=schedule, task=schedule.task)
-
-    return render(
-        request,
-        "core/edit_schedule.html",
-        {
-            "form": form,
-            "schedule": schedule,
-        },
+        form = TimeBlockForm(instance=block, task=block.task)
+    return time_block_page(
+        request, form, block.task, title="Edit time block", submit="Save changes", crumb="Calendar",
+        cancel_url=f"{reverse('calendar')}?week={block.date:%Y-%m-%d}",
     )
+
+
+@login_required
+@require_POST
+def delete_block(request, block_id):
+    block = get_object_or_404(TimeBlock, id=block_id, **{BLOCK_OWNER: request.user})
+    goal_id = block.task.goal.id
+    block.delete()
+    messages.success(request, "Time block removed.")
+    return redirect("goal_detail", goal_id=goal_id)

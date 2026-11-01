@@ -1,29 +1,32 @@
-from core.views import edit_checkpoint
 from django.urls import path
-from .views import dashboard,register,create_goal,goal_detail,edit_goal,delete_goal,toggle_task, edit_roadmap,edit_milestone,toggle_task,edit_task,schedule_task,delete_schedule, calendar_view
-from .views import edit_schedule, create_milestone,create_roadmap,delete_task,create_checkpoint,create_task, delete_roadmap, delete_checkpoint, delete_milestone
+
+from . import views
+
 urlpatterns = [
-    path("", dashboard, name="dashboard"),
-    path("register/",register,name="register"),
-    path("goals/create",create_goal,name="create_goal"),
-    path("goals/<int:goal_id>/", goal_detail, name="goal_detail"),
-    path("goals/<int:goal_id>/edit/", edit_goal, name="edit_goal"),
-    path("goals/<int:goal_id>/delete/", delete_goal, name="delete_goal"),
-    path("tasks/<int:task_id>/toggle/", toggle_task, name="toggle_task"),
-    path("roadmaps/<int:roadmap_id>/edit/", edit_roadmap, name="edit_roadmap"),
-    path("milestones/<int:milestone_id>/edit/", edit_milestone, name="edit_milestone"),
-    path("checkpoints/<int:checkpoint_id>/edit/",edit_checkpoint,name="edit_checkpoint"),
-    path("tasks/<int:task_id>/edit/",edit_task,name="edit_task"),
-    path("schedule/<int:task_id>",schedule_task,name="schedule_task"),
-    path("schedule/<int:schedule_id>/delete/",delete_schedule,name="delete_schedule"),
-    path("calendar/",calendar_view,name="calendar"),
-    path("schedules/<int:schedule_id>/edit/",edit_schedule,name="edit_schedule"),
-    path("roadmaps/<int:roadmap_id>/milestones/create/",create_milestone,name="create_milestone"),
-    path("goals/<int:goal_id>/roadmap/create/",create_roadmap,name="create_roadmap"),
-    path("milestones/<int:milestone_id>/checkpoints/create/",create_checkpoint,name="create_checkpoint"),
-    path("checkpoints/<int:checkpoint_id>/tasks/create/",create_task,name="create_task"),
-    path("roadmaps/<int:roadmap_id>/delete/",delete_roadmap,name="delete_roadmap"),
-    path("milestones/<int:milestone_id>/delete/",delete_milestone,name="delete_milestone"),
-    path("checkpoints/<int:checkpoint_id>/delete/",delete_checkpoint,name="delete_checkpoint"),
-    path("tasks/<int:task_id>/delete/",delete_task,name="delete_task"),
+    path("", views.dashboard, name="dashboard"),
+    path("register/", views.register, name="register"),
+    path("calendar/", views.calendar_view, name="calendar"),
+
+    path("goals/", views.goal_list, name="goal_list"),
+    path("goals/new/", views.create_goal, name="create_goal"),
+    path("goals/<int:goal_id>/", views.goal_detail, name="goal_detail"),
+    path("goals/<int:goal_id>/edit/", views.edit_goal, name="edit_goal"),
+    path("goals/<int:goal_id>/delete/", views.delete_goal, name="delete_goal"),
+    path("goals/<int:goal_id>/phases/new/", views.create_phase, name="create_phase"),
+
+    path("phases/<int:phase_id>/edit/", views.edit_phase, name="edit_phase"),
+    path("phases/<int:phase_id>/delete/", views.delete_phase, name="delete_phase"),
+    path("phases/<int:phase_id>/steps/new/", views.create_step, name="create_step"),
+
+    path("steps/<int:step_id>/edit/", views.edit_step, name="edit_step"),
+    path("steps/<int:step_id>/delete/", views.delete_step, name="delete_step"),
+    path("steps/<int:step_id>/tasks/new/", views.create_task, name="create_task"),
+
+    path("tasks/<int:task_id>/edit/", views.edit_task, name="edit_task"),
+    path("tasks/<int:task_id>/delete/", views.delete_task, name="delete_task"),
+    path("tasks/<int:task_id>/toggle/", views.toggle_task, name="toggle_task"),
+    path("tasks/<int:task_id>/schedule/", views.schedule_task, name="schedule_task"),
+
+    path("blocks/<int:block_id>/edit/", views.edit_block, name="edit_block"),
+    path("blocks/<int:block_id>/delete/", views.delete_block, name="delete_block"),
 ]

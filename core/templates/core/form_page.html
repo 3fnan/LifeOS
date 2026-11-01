@@ -1,0 +1,69 @@
+{% extends "core/base.html" %}
+{% load planner %}
+
+{% block title %}{{ title }} · LifeGrid{% endblock %}
+
+{% block content %}
+<div class="form-page">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="{{ cancel_url }}">{{ eyebrow }}</a></nav>
+
+    <header class="form-head">
+        <h1 class="display">{{ title }}</h1>
+        {% if description %}<p class="sub">{{ description }}</p>{% endif %}
+    </header>
+
+    {% if task %}
+    <div class="task-summary pg-{{ task.goal.pigment }}">
+        <p class="task-name">{{ task.title }}</p>
+        <p class="task-meta"><span class="swatch" aria-hidden="true"></span>{{ task.goal.title }} · about {{ task.estimated_minutes|duration }}</p>
+        {% if plan_hint %}<p class="task-meta">{{ plan_hint }}</p>{% endif %}
+    </div>
+    {% endif %}
+
+    <form method="post" class="form" novalidate>
+        {% csrf_token %}
+
+        {% if form.non_field_errors %}
+        <div class="notice {% if form.capacity_warnings %}notice-warning{% else %}notice-error{% endif %}" role="alert">
+            {% for error in form.non_field_errors %}<p class="notice-title">{{ error }}</p>{% endfor %}
+            {% if form.capacity_warnings %}
+            <ul>{% for warning in form.capacity_warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <div class="fields">
+            {% for field in form %}
+            {% if field.name == "confirm_over_capacity" %}
+                {% if form.capacity_warnings %}
+                <label class="switch-field field-full is-confirm">
+                    {{ field }}<span class="switch" aria-hidden="true"></span>
+                    <span>{{ field.label }}</span>
+                </label>
+                {% endif %}
+            {% elif field.widget_type == "checkbox" %}
+            <label class="switch-field field-full">
+                {{ field }}<span class="switch" aria-hidden="true"></span>
+                <span>{{ field.label }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}</span>
+            </label>
+            {% else %}
+            <div class="field {% if field.widget_type in 'dateinput timeinput numberinput select' %}field-half{% else %}field-full{% endif %}{% if field.errors %} has-error{% endif %}">
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}<small class="help">{{ field.help_text }}</small>{% endif %}
+                {% for error in field.errors %}<small class="field-error">{{ error }}</small>{% endfor %}
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">{{ submit }}</button>
+            {% if secondary_submit %}
+            <button type="submit" name="then" value="{{ secondary_submit.0 }}" class="btn btn-secondary">{{ secondary_submit.1 }}</button>
+            {% endif %}
+            <a href="{{ cancel_url }}" class="btn btn-quiet">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

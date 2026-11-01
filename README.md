@@ -31,7 +31,7 @@ The interface is responsive as well as functional. CSS media queries alter the s
 ## Tech stack
 
 - Python
-- Django 6.1.1
+- Django 6.1.2
 - SQLite (development database)
 - Django templates, CSS, and JavaScript
 
@@ -92,7 +92,7 @@ manage.py             Django management entry point
 These steps assume Python is installed and that commands are run from the cloned project directory.
 
 ```powershell
-git clone -b web50/projects/2020/x/capstone https://github.com/me50/3fnan.git LifeOS
+git clone https://github.com/3fnan/LifeOS.git
 cd LifeOS
 py -m venv venv
 .\venv\Scripts\Activate.ps1

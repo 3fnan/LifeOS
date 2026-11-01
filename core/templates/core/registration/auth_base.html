@@ -1,0 +1,13 @@
+{% extends "core/base.html" %}
+
+{% block auth_content %}
+<div class="auth">
+    <div class="auth-intro">
+        <p class="wordmark wordmark-lg">LifeGrid</p>
+        <p class="lead">Turn a goal into phases, steps and small tasks, then give each task a time on your week.</p>
+    </div>
+    <div class="auth-form">
+        {% block auth_card %}{% endblock %}
+    </div>
+</div>
+{% endblock %}

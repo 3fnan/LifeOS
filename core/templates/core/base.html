@@ -1,68 +1,82 @@
-{% load static %}
-
-<!DOCTYPE html>
+{% load static %}<!DOCTYPE html>
 <html lang="en">
 
 <head>
-    <link rel="stylesheet" href="{% static 'core/css/style.css' %}">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
+    <meta name="color-scheme" content="light dark">
     <title>{% block title %}LifeGrid{% endblock %}</title>
+    <script>
+        /* Apply the saved theme before first paint to avoid a flash. */
+        try {
+            var savedTheme = localStorage.getItem("lifegrid-theme");
+            if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+        } catch (e) {}
+    </script>
+    <link rel="preload" href="{% static 'core/fonts/newsreader-latin.woff2' %}" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="{% static 'core/css/style.css' %}">
     <link rel="icon" type="image/svg+xml" href="{% static 'core/favicon.svg' %}">
 </head>
 
 <body>
+    <a class="skip-link" href="#main">Skip to content</a>
 
+    {% if user.is_authenticated %}
+    {% with url_name=request.resolver_match.url_name %}
+    <header class="masthead">
+        <div class="masthead-inner">
+            <a class="wordmark" href="{% url 'dashboard' %}">LifeGrid</a>
 
-    <div class="app">
-
-        {% if user.is_authenticated %}
-        <aside class="sidebar">
-
-            <div class="brand">
-                LifeGrid
-            </div>
-
-            <nav class="nav">
-
-                <a class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}nav-link--active{% endif %}"
-                    href="{% url 'dashboard' %}">
-                    Dashboard
-                </a>
-
-                <a class="nav-link {% if request.resolver_match.url_name == 'calendar' %}nav-link--active{% endif %}"
-                    href="{% url 'calendar' %}">
-                    Calendar
-                </a>
-
-                <a class="nav-link {% if request.resolver_match.url_name == 'create_goal' %}nav-link--active{% endif %}"
-                    href="{% url 'create_goal' %}">
-                    + New Goal
-                </a>
-
+            <nav class="nav" aria-label="Main">
+                <a href="{% url 'dashboard' %}" {% if url_name == 'dashboard' %}aria-current="page"{% endif %}>Today</a>
+                <a href="{% url 'calendar' %}" {% if url_name == 'calendar' %}aria-current="page"{% endif %}>Calendar</a>
+                <a href="{% url 'goal_list' %}" {% if url_name == 'goal_list' or url_name == 'goal_detail' %}aria-current="page"{% endif %}>Goals</a>
             </nav>
 
-            <div class="sidebar-bottom">
-                <span>{{ user.username }}</span>
-
+            <div class="masthead-actions">
+                <a class="btn btn-primary btn-sm hide-narrow" href="{% url 'create_goal' %}">New goal</a>
+                <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch light or dark theme" title="Switch theme">
+                    <span class="only-light">{% include "core/icon.html" with name="moon" %}</span>
+                    <span class="only-dark">{% include "core/icon.html" with name="sun" %}</span>
+                </button>
                 <form method="post" action="{% url 'logout' %}">
                     {% csrf_token %}
-                    <button type="submit">Logout</button>
+                    <button type="submit" class="icon-btn" aria-label="Log out {{ user.username }}" title="Log out">
+                        {% include "core/icon.html" with name="logout" %}
+                    </button>
                 </form>
             </div>
+        </div>
+    </header>
 
-        </aside>
-        {% endif %}
+    <main class="page" id="main">
+        {% block content %}{% endblock %}
+    </main>
 
-        <main class="main">
-            {% block content %}
-            {% endblock %}
-        </main>
+    <nav class="tabbar" aria-label="Main">
+        <a href="{% url 'dashboard' %}" {% if url_name == 'dashboard' %}aria-current="page"{% endif %}>{% include "core/icon.html" with name="home" size=20 %}<span>Today</span></a>
+        <a href="{% url 'calendar' %}" {% if url_name == 'calendar' %}aria-current="page"{% endif %}>{% include "core/icon.html" with name="calendar" size=20 %}<span>Calendar</span></a>
+        <a href="{% url 'goal_list' %}" {% if url_name == 'goal_list' or url_name == 'goal_detail' %}aria-current="page"{% endif %}>{% include "core/icon.html" with name="flag" size=20 %}<span>Goals</span></a>
+        <a href="{% url 'create_goal' %}" {% if url_name == 'create_goal' %}aria-current="page"{% endif %}>{% include "core/icon.html" with name="plus" size=20 %}<span>New</span></a>
+    </nav>
+    {% endwith %}
+    {% else %}
+    <main class="page page-auth" id="main">
+        {% block auth_content %}{% endblock %}
+    </main>
+    {% endif %}
 
+    {% if messages %}
+    <div class="toasts" role="status" aria-live="polite">
+        {% for message in messages %}
+        <div class="toast toast-{{ message.tags|default:'info' }}">
+            <span>{{ message }}</span>
+            <button type="button" class="toast-close" aria-label="Dismiss">{% include "core/icon.html" with name="x" size=14 %}</button>
+        </div>
+        {% endfor %}
     </div>
+    {% endif %}
 
-    {% load static %}
     <script src="{% static 'core/js/app.js' %}"></script>
 </body>
 

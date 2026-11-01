@@ -1,149 +1,54 @@
 {% extends "core/base.html" %}
+{% load planner %}
 
-{% block title %}
-Calendar - LifeGrid
-{% endblock %}
+{% block title %}Calendar · LifeGrid{% endblock %}
 
 {% block content %}
-<div class="calendar-page">
-
-    <div class="page-header calendar-page-header">
-        <div>
-            <span class="form-eyebrow">YOUR SCHEDULE</span>
-            <h1>Calendar</h1>
-            <p class="calendar-date-range">
-                {{ start_date|date:"M d, Y" }}
-                – {{ end_date|date:"M d, Y" }}
-            </p>
-        </div>
-
-        <div class="calendar-navigation">
-            <a href="?week={{ previous_week|date:'Y-m-d' }}" class="button button-secondary">
-                ← Previous
-            </a>
-
-            <a href="{% url 'calendar' %}" class="button">
-                Today
-            </a>
-
-            <a href="?week={{ next_week|date:'Y-m-d' }}" class="button button-secondary">
-                Next →
-            </a>
-        </div>
+<header class="page-head">
+    <div>
+        <h1 class="display">{{ start_date|date:"j M" }} – {{ end_date|date:"j M Y" }}</h1>
+        <p class="sub">Week {{ start_date|date:"W" }} <span class="sep" aria-hidden="true">·</span> {{ week_blocks }} block{{ week_blocks|pluralize }} <span class="sep" aria-hidden="true">·</span> {{ week_minutes|duration }} planned</p>
     </div>
+    <nav class="week-nav" aria-label="Change week">
+        <a href="?week={{ previous_week|date:'Y-m-d' }}" class="icon-btn icon-btn-framed" aria-label="Previous week" title="Previous week">{% include "core/icon.html" with name="chevron-left" %}</a>
+        {% if is_current_week %}<span class="btn btn-secondary btn-sm is-static" aria-current="date">This week</span>{% else %}<a href="{% url 'calendar' %}" class="btn btn-secondary btn-sm">This week</a>{% endif %}
+        <a href="?week={{ next_week|date:'Y-m-d' }}" class="icon-btn icon-btn-framed" aria-label="Next week" title="Next week">{% include "core/icon.html" with name="chevron-right" %}</a>
+    </nav>
+</header>
 
-    <!-- Desktop: seven-column weekly grid -->
-    <div class="calendar-grid calendar-desktop">
-
-        {% for day in days %}
-        <section class="calendar-day {% if day.is_today %}today{% endif %}">
-
-            <header class="calendar-day-header">
-                <strong>{{ day.date|date:"D" }}</strong>
-                <span>{{ day.date|date:"M d" }}</span>
-                {% if day.is_today %}
-                <span class="calendar-today-label">Today</span>
-                {% endif %}
-            </header>
-
-            <div class="calendar-schedules">
-                {% for schedule in day.schedules %}
-                <article class="calendar-event {% if schedule.task.status == 'completed' %}completed{% endif %}">
-
-                    <a href="{% url 'edit_schedule' schedule.id %}" class="calendar-event-link">
-                        <span class="calendar-event-time">
-                            {{ schedule.start_time|time:"g:i A" }}
-                        </span>
-
-                        <strong>{{ schedule.task.title }}</strong>
-
-                        <span class="calendar-event-duration">
-                            {{ schedule.duration_minutes }} min
-                        </span>
-                    </a>
-
-                    <form method="post" action="{% url 'toggle_task' schedule.task.id %}?from=calendar">
-                        {% csrf_token %}
-                        <button type="submit" class="calendar-complete">
-                            {% if schedule.task.status == "completed" %}
-                            Undo
-                            {% else %}
-                            Complete
-                            {% endif %}
-                        </button>
-                    </form>
-                </article>
-                {% empty %}
-                <p class="calendar-empty">No tasks scheduled</p>
-                {% endfor %}
-            </div>
-        </section>
-        {% endfor %}
-
-    </div>
-
-    <!-- Mobile: vertical day-by-day agenda -->
-    <div class="calendar-agenda">
-
-        {% for day in days %}
-        <section class="agenda-day {% if day.is_today %}today{% endif %}">
-
-            <header class="agenda-day-header">
-                <div>
-                    <h2>{{ day.date|date:"l" }}</h2>
-                    <p>{{ day.date|date:"M d, Y" }}</p>
-                </div>
-
-                {% if day.is_today %}
-                <span class="calendar-today-label">Today</span>
-                {% endif %}
-            </header>
-
-            <div class="agenda-schedules">
-                {% for schedule in day.schedules %}
-                <article class="agenda-event {% if schedule.task.status == 'completed' %}completed{% endif %}">
-
-                    <div class="agenda-event-time">
-                        {{ schedule.start_time|time:"g:i A" }}
-                    </div>
-
-                    <div class="agenda-event-details">
-                        <a href="{% url 'edit_schedule' schedule.id %}" class="agenda-event-title">
-                            {{ schedule.task.title }}
-                        </a>
-
-                        <span class="calendar-event-duration">
-                            {{ schedule.duration_minutes }} min
-                        </span>
-
-                        <div class="agenda-event-actions">
-                            <a href="{% url 'edit_schedule' schedule.id %}"
-                                class="button button-secondary button-small">
-                                Edit
-                            </a>
-
-                            <form method="post" action="{% url 'toggle_task' schedule.task.id %}?from=calendar">
-                                {% csrf_token %}
-                                <button type="submit" class="calendar-complete">
-                                    {% if schedule.task.status == "completed" %}
-                                    Undo
-                                    {% else %}
-                                    Complete
-                                    {% endif %}
-                                </button>
-                            </form>
-                        </div>
-                    </div>
-                </article>
-                {% empty %}
-                <p class="calendar-empty">Nothing scheduled for this day.</p>
-                {% endfor %}
-            </div>
-        </section>
-        {% endfor %}
-
-    </div>
-
+<div class="week">
+    {% for day in days %}
+    <section class="day {% if day.is_today %}is-today{% endif %}" aria-label="{{ day.date|date:'l j F' }}">
+        <header class="day-head">
+            <span class="day-name"><abbr title="{{ day.date|date:'l' }}">{{ day.date|date:"D" }}</abbr></span>
+            <span class="day-num">{{ day.date|date:"j" }}</span>
+            {% if day.minutes %}<span class="day-total">{{ day.minutes|duration }}</span>{% endif %}
+        </header>
+        <ol class="day-blocks">
+            {% for schedule in day.schedules %}
+            {% with task=schedule.task goal=schedule.task.step.phase.goal %}
+            <li class="entry pg-{{ goal.pigment }} entry-{{ schedule.effective_status }}" data-task-row data-task-id="{{ task.id }}" data-status="{{ task.status }}">
+                <a href="{% url 'edit_block' schedule.id %}" class="entry-link">
+                    <span class="entry-time">{{ schedule.start_time|time:"H:i" }}–{{ schedule.end_time|time:"H:i" }}</span>
+                    <span class="task-name">{{ task.title }}</span>
+                    <span class="entry-goal"><span class="swatch" aria-hidden="true"></span>{{ goal.title }}</span>
+                    {% if schedule.effective_status == "missed" or schedule.effective_status == "skipped" %}
+                    <span class="state state-{{ schedule.effective_status }}">{{ schedule.effective_status_label }}</span>
+                    {% endif %}
+                </a>
+                <form method="post" action="{% url 'toggle_task' task.id %}?from=calendar" data-async-toggle>
+                    {% csrf_token %}
+                    <button type="submit" class="tick tick-sm" aria-pressed="{% if task.status == 'done' %}true{% else %}false{% endif %}" aria-label="Done: {{ task.title }}">
+                        {% include "core/icon.html" with name="check" size=12 %}
+                    </button>
+                </form>
+            </li>
+            {% endwith %}
+            {% empty %}
+            <li class="day-free">Free</li>
+            {% endfor %}
+        </ol>
+    </section>
+    {% endfor %}
 </div>
 {% endblock %}
-```

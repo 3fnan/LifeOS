@@ -1,377 +1,111 @@
 {% extends "core/base.html" %}
+{% load planner %}
 
-{% block title %}
-{{ goal.title }} - LifeGrid
-{% endblock %}
+{% block title %}{{ goal.title }} · LifeGrid{% endblock %}
 
 {% block content %}
+<div class="pg-{{ goal.pigment }}" data-progress-scope>
 
-<div class="goal-page">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="{% url 'goal_list' %}">Goals</a></nav>
 
-    <div class="goal-header">
-
+    <header class="page-head goal-head">
         <div>
-            <span class="status">
-                {{ goal.get_status_display }}
-            </span>
-
-            <h1>{{ goal.title }}</h1>
-
-            <p>
-                {{ goal.get_category_display }}
-                · Target {{ goal.target_date }}
-            </p>
-
-            <div class="goal-progress">
-                <div class="progress-label">
-                    <span>Overall Progress</span>
-                    <strong class="goal-progress-value">{{ progress }}%</strong>
-                </div>
-
-                <div class="progress-bar">
-                    <div class="progress-fill goal-progress-fill" style="width: {{ progress }}%;"></div>
-                </div>
-
-                <small class="goal-progress-count">
-                    {{ completed_tasks }} of {{ total_tasks }} tasks completed
-                </small>
-            </div>
+            <h1 class="display"><span class="swatch swatch-lg" aria-hidden="true"></span>{{ goal.title }}</h1>
+            {% if goal.description %}<p class="lead">{{ goal.description }}</p>{% endif %}
+            <dl class="facts">
+                <div><dt>Status</dt><dd>{{ goal.get_status_display }}</dd></div>
+                <div><dt>Target</dt><dd>{{ goal.target_date|date:"j M Y" }}</dd></div>
+                <div><dt>Budget</dt><dd>{{ goal.daily_minutes|duration }} a day, {{ goal.days_per_week }} day{{ goal.days_per_week|pluralize }} a week</dd></div>
+                <div><dt>Priority</dt><dd>{{ goal.get_priority_display }}</dd></div>
+            </dl>
         </div>
-
-        <div class="goal-actions">
-            <a href="{% url 'edit_goal' goal.id %}" class="button">
-                Edit Goal
-            </a>
-
-            <a href="{% url 'delete_goal' goal.id %}" class="button button-danger">
-                Delete
-            </a>
+        <div class="head-actions">
+            <a href="{% url 'edit_goal' goal.id %}" class="btn btn-secondary">Edit</a>
+            <a href="{% url 'delete_goal' goal.id %}" class="btn btn-quiet btn-danger-text">Delete</a>
         </div>
+    </header>
 
+    <div class="goal-progress">
+        <span class="meter meter-lg" role="img" aria-label="Goal progress"><span data-progress-bar style="width: {{ progress }}%"></span></span>
+        <p class="section-meta"><span data-progress-count>{{ completed_tasks }} of {{ total_tasks }}</span> tasks done · <span data-progress-value>{{ progress }}</span>%</p>
     </div>
 
-
-    {% if roadmap %}
-
-    <section class="roadmap-section">
-
-        <div class="section-header">
-
-            <div>
-                <h2>{{ roadmap.title }}</h2>
-
-                {% if roadmap.description %}
-                <p>{{ roadmap.description }}</p>
-                {% endif %}
+    {% for phase in phases %}
+    <section class="phase" data-progress-scope aria-labelledby="phase-{{ phase.id }}">
+        <header class="phase-head">
+            <h2 id="phase-{{ phase.id }}"><span class="phase-index">{{ forloop.counter }}</span>{{ phase.title }}</h2>
+            <span class="state state-{{ phase.status }}">{{ phase.status_label }}</span>
+            <p class="section-meta phase-count"><span data-progress-count>{{ phase.completed_tasks }} of {{ phase.total_tasks }}</span></p>
+            <div class="row-actions">
+                <a href="{% url 'edit_phase' phase.id %}" class="icon-btn" aria-label="Edit phase {{ phase.title }}" title="Edit phase">{% include "core/icon.html" with name="edit" %}</a>
+                <a href="{% url 'delete_phase' phase.id %}" class="icon-btn icon-btn-danger" aria-label="Delete phase {{ phase.title }}" title="Delete phase">{% include "core/icon.html" with name="trash" %}</a>
             </div>
+        </header>
+        {% if phase.description %}<p class="phase-desc">{{ phase.description }}</p>{% endif %}
 
-            <div class="section-actions">
-
-                <a href="{% url 'edit_roadmap' roadmap.id %}" class="button">
-                    Edit Roadmap
-                </a>
-
-                <a href="{% url 'delete_roadmap' roadmap.id %}" class="button button-danger">
-                    Delete Roadmap
-                </a>
-
+        {% for step in phase.steps.all %}
+        <div class="step">
+            <div class="step-head">
+                <h3>{{ step.title }}</h3>
+                <span class="state state-{{ step.status }}">{{ step.status_label }}</span>
+                <div class="row-actions">
+                    <a href="{% url 'edit_step' step.id %}" class="icon-btn" aria-label="Edit step {{ step.title }}" title="Edit step">{% include "core/icon.html" with name="edit" %}</a>
+                    <a href="{% url 'delete_step' step.id %}" class="icon-btn icon-btn-danger" aria-label="Delete step {{ step.title }}" title="Delete step">{% include "core/icon.html" with name="trash" %}</a>
+                </div>
             </div>
-        </div>
+            {% if step.description %}<p class="step-desc">{{ step.description }}</p>{% endif %}
 
-
-        <div class="milestone-list">
-
-            {% for milestone in roadmap.milestones.all %}
-
-            <div class="milestone-card">
-
-                <div class="milestone-header">
-
-                    <div>
-                        <span class="milestone-number">
-                            {{ milestone.order }}
-                        </span>
-
-                        <h3>{{ milestone.title }}</h3>
-                    </div>
-
-                    {% if milestone.is_completed %}
-                    <span class="status status-completed">
-                        Completed
-                    </span>
-                    {% elif milestone.completed_tasks > 0 %}
-                    <span class="status status-progress">
-                        In Progress
-                    </span>
-                    {% else %}
-                    <span class="status status-pending">
-                        Not Started
-                    </span>
-                    {% endif %}
-
-                </div>
-
-
-                {% if milestone.description %}
-                <p>{{ milestone.description }}</p>
-                {% endif %}
-
-
-                <div class="milestone-actions">
-
-                    <a href="{% url 'create_checkpoint' milestone.id %}" class="button button-small">
-                        + Add Checkpoint
-                    </a>
-
-                    <a href="{% url 'edit_milestone' milestone.id %}" class="button button-small">
-                        Edit Milestone
-                    </a>
-
-                    <a href="{% url 'delete_milestone' milestone.id %}" class="button button-small button-danger">
-                        Delete
-                    </a>
-
-                </div>
-
-
-                <div class="progress-info">
-
-                    <div class="progress-label">
-                        <span class="milestone-progress-count">
-                            {{ milestone.completed_tasks }}
-                            /
-                            {{ milestone.total_tasks }}
-                            tasks completed
-                        </span>
-
-                        <strong class="milestone-progress-value">
-                            {{ milestone.progress }}%
-                        </strong>
-                    </div>
-
-                    <div class="progress-bar">
-                        <div class="progress-fill milestone-progress-fill" style="width: {{ milestone.progress }}%;">
-                        </div>
-                    </div>
-
-                </div>
-
-
-                <div class="checkpoint-list">
-
-                    {% for checkpoint in milestone.checkpoints.all %}
-
-                    <div class="checkpoint">
-
-                        <div class="checkpoint-content">
-
-                            <div class="checkpoint-header">
-
-                                <div class="checkpoint-title">
-
-                                    <strong>
-                                        {{ checkpoint.title }}
-                                    </strong>
-
-                                    <span class="status">
-                                        {{ checkpoint.get_status_display }}
-                                    </span>
-
-                                </div>
-
-                                <div class="checkpoint-actions">
-
-                                    <a href="{% url 'create_task' checkpoint.id %}" class="button button-small">
-                                        + Add Task
-                                    </a>
-
-                                    <a href="{% url 'edit_checkpoint' checkpoint.id %}" class="button button-small">
-                                        Edit
-                                    </a>
-
-                                    <a href="{% url 'delete_checkpoint' checkpoint.id %}"
-                                        class="button button-small button-danger">
-                                        Delete
-                                    </a>
-
-                                </div>
-
+            <ul class="checklist">
+                {% for task in step.tasks.all %}
+                <li class="check-row" data-task-row data-task-id="{{ task.id }}" data-status="{{ task.status }}">
+                    <form method="post" action="{% url 'toggle_task' task.id %}" data-async-toggle>
+                        {% csrf_token %}
+                        <button type="submit" class="tick" aria-pressed="{% if task.status == 'done' %}true{% else %}false{% endif %}" aria-label="Done: {{ task.title }}">
+                            {% include "core/icon.html" with name="check" size=14 %}
+                        </button>
+                    </form>
+                    <div class="check-body">
+                        <p class="task-name">{{ task.title }}{% if task.status == "doing" %} <span class="state state-in_progress">Doing</span>{% endif %}</p>
+                        {% if task.description %}<p class="task-desc">{{ task.description }}</p>{% endif %}
+                        <div class="task-meta">
+                            <span>{{ task.estimated_minutes|duration }}</span>
+                            {% for block in task.blocks.all %}
+                            <div class="slot slot-{{ block.effective_status }}">
+                                <a href="{% url 'edit_block' block.id %}" title="Edit this time block">{{ block.date|date:"D j M" }}, {{ block.start_time|time:"H:i" }}–{{ block.end_time|time:"H:i" }}{% if block.effective_status != "planned" %} · {{ block.effective_status_label|lower }}{% endif %}</a>
+                                <form method="post" action="{% url 'delete_block' block.id %}">
+                                    {% csrf_token %}
+                                    <button type="submit" class="slot-remove" aria-label="Remove the block on {{ block.date|date:'j M' }}" title="Remove">{% include "core/icon.html" with name="x" size=12 %}</button>
+                                </form>
                             </div>
-
-                            {% if checkpoint.description %}
-                            <p>{{ checkpoint.description }}</p>
-                            {% endif %}
-
-                        </div>
-
-
-                        <div class="task-list">
-
-                            {% for task in checkpoint.tasks.all %}
-
-                            <div class="task-item" data-task-id="{{ task.id }}">
-
-                                <div class="task-main">
-
-                                    {% if task.status == "completed" %}
-                                    <div class="task-checkbox completed">
-                                        ✓
-                                    </div>
-                                    {% else %}
-                                    <div class="task-checkbox">
-                                        ○
-                                    </div>
-                                    {% endif %}
-
-                                    <div>
-                                        <strong
-                                            class="task-title {% if task.status == 'completed' %}task-completed{% endif %}">
-                                            {{ task.title }}
-                                        </strong>
-
-                                        {% if task.description %}
-                                        <p>{{ task.description }}</p>
-                                        {% endif %}
-                                    </div>
-
-                                </div>
-
-                                {% if task.schedules.all %}
-                                <div class="task-schedules">
-                                    {% for schedule in task.schedules.all %}
-                                    <div class="schedule-item">
-
-                                        <div class="schedule-info">
-                                            <span class="schedule-date">
-                                                📅 {{ schedule.date }}
-                                            </span>
-
-                                            <span class="schedule-time">
-                                                🕐 {{ schedule.start_time|time:"H:i" }} –
-                                                {{ schedule.end_time|time:"H:i" }}
-                                            </span>
-                                        </div>
-
-                                        <div class="schedule-footer">
-                                            <span class="status">
-                                                {{ schedule.get_status_display }}
-                                            </span>
-
-                                            <div class="schedule-actions">
-                                                <a href="{% url 'edit_schedule' schedule.id %}" class="schedule-action">
-                                                    Edit
-                                                </a>
-
-                                                <form method="post" action="{% url 'delete_schedule' schedule.id %}">
-                                                    {% csrf_token %}
-
-                                                    <button type="submit" class="schedule-remove">
-                                                        Remove
-                                                    </button>
-                                                </form>
-                                            </div>
-                                        </div>
-
-                                    </div>
-                                    {% endfor %}
-                                </div>
-                                {% endif %}
-
-
-                                <div class="task-meta">
-                                    <span>{{ task.estimated_minutes }} min</span>
-
-                                    <a href="{% url 'edit_task' task.id %}" class="button button-small">
-                                        Edit
-                                    </a>
-
-                                    <a href="{% url 'schedule_task' task.id %}" class="button button-small">
-                                        Schedule
-                                    </a>
-
-                                    <a href="{% url 'delete_task' task.id %}" class="button button-small button-danger">
-                                        Delete
-                                    </a>
-
-                                    <form method="post" action="{% url 'toggle_task' task.id %}">
-                                        {% csrf_token %}
-                                        <button type="submit" class="task-button complete-task-btn">
-                                            {% if task.status == "completed" %}
-                                            Undo
-                                            {% else %}
-                                            Complete
-                                            {% endif %}
-                                        </button>
-                                    </form>
-                                </div>
-
-                            </div>
-
-                            {% empty %}
-
-                            <p class="empty-text">
-                                No tasks yet.
-                            </p>
-
                             {% endfor %}
-
                         </div>
-
                     </div>
-
-                    {% empty %}
-
-                    <p class="empty-text">
-                        No checkpoints yet.
-                    </p>
-
-                    {% endfor %}
-
-                </div>
-
-            </div>
-
-            {% empty %}
-
-            <p class="empty-text">
-                No milestones yet. Add your first milestone to start building this roadmap.
-            </p>
-
-            <a href="{% url 'create_milestone' roadmap.id %}" class="button">
-                + Add Milestone
-            </a>
-
-            {% endfor %}
-
+                    <div class="row-actions">
+                        <a href="{% url 'schedule_task' task.id %}" class="btn btn-secondary btn-sm">Schedule</a>
+                        <a href="{% url 'edit_task' task.id %}" class="icon-btn" aria-label="Edit task {{ task.title }}" title="Edit task">{% include "core/icon.html" with name="edit" %}</a>
+                        <a href="{% url 'delete_task' task.id %}" class="icon-btn icon-btn-danger" aria-label="Delete task {{ task.title }}" title="Delete task">{% include "core/icon.html" with name="trash" %}</a>
+                    </div>
+                </li>
+                {% endfor %}
+                <li class="add-line"><a href="{% url 'create_task' step.id %}">{% include "core/icon.html" with name="plus" size=14 %}Add a task</a></li>
+            </ul>
         </div>
+        {% empty %}
+        <p class="hint">Add the first step: a concrete outcome for this phase, such as “Understand Django models”.</p>
+        {% endfor %}
 
+        <a class="add-line add-step" href="{% url 'create_step' phase.id %}">{% include "core/icon.html" with name="plus" size=14 %}Add a step to {{ phase.title }}</a>
     </section>
-
-
-    {% else %}
-
-    <div class="empty-state">
-        <h2>No roadmap yet</h2>
-
-        <p>
-            This goal doesn't have a roadmap yet.
-        </p>
-
-        <a href="{% url 'create_roadmap' goal.id %}" class="button">
-            + Create Roadmap
-        </a>
+    {% empty %}
+    <div class="empty">
+        <p class="empty-title">This goal has no phases yet.</p>
+        <p>A phase is a big stage of the goal, like “Fundamentals” or “Build a project”. Inside each phase you'll add steps, and inside each step the tasks you'll put on your calendar.</p>
+        <a href="{% url 'create_phase' goal.id %}" class="btn btn-primary">Add the first phase</a>
     </div>
+    {% endfor %}
 
+    {% if phases %}
+    <a class="add-line add-phase" href="{% url 'create_phase' goal.id %}">{% include "core/icon.html" with name="plus" size=14 %}Add a phase</a>
     {% endif %}
-
-
-
-    <div class="goal-footer">
-        <a href="{% url 'dashboard' %}" class="button button-secondary">
-            Back to Dashboard
-        </a>
-    </div>
-
 </div>
-
 {% endblock %}

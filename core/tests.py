@@ -1,134 +1,653 @@
+import datetime
+from unittest import mock
 
-from django.test import TestCase
 from django.contrib.auth import get_user_model
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
+from django.test import Client, TestCase, TransactionTestCase
 from django.urls import reverse
+from django.utils import timezone
 
-from core.models import Goal, Roadmap, Milestone, Checkpoint, Task
+from core.forms import GoalForm, TimeBlockForm
+from core.models import Goal, Phase, Step, Task, TimeBlock
+
+PASSWORD = "test-password-123"
 
 
-class ToggleTaskSecurityTests(TestCase): #authorization
+# ---------------------------------------------------------------------------
+# Shared isolated fixtures. Every test runs on Django's throwaway test DB.
+# ---------------------------------------------------------------------------
+def make_tree(user, title="Learn Django", hours_per_day=1, days_per_week=5):
+    """Create a full Goal > Phase > Step > Task > TimeBlock chain."""
+    goal = Goal.objects.create(
+        user=user, title=title, category="education", priority="high",
+        days_per_week=days_per_week, hours_per_day=hours_per_day,
+        start_date="2026-10-10", target_date="2026-12-10",
+    )
+    phase = Phase.objects.create(goal=goal, title="Phase", order=1)
+    step = Step.objects.create(phase=phase, title="Step", order=1)
+    task = Task.objects.create(step=step, title="Task")
+    block = TimeBlock.objects.create(
+        task=task, date="2026-11-02", start_time="09:00", end_time="10:00",
+    )
+    return {"goal": goal, "phase": phase, "step": step, "task": task, "block": block}
+
+
+def object_routes(tree):
+    """Every URL that reads or changes one user-owned object."""
+    return [
+        ("goal_detail", tree["goal"].id), ("edit_goal", tree["goal"].id),
+        ("delete_goal", tree["goal"].id), ("create_phase", tree["goal"].id),
+        ("edit_phase", tree["phase"].id), ("delete_phase", tree["phase"].id),
+        ("create_step", tree["phase"].id),
+        ("edit_step", tree["step"].id), ("delete_step", tree["step"].id),
+        ("create_task", tree["step"].id),
+        ("edit_task", tree["task"].id), ("delete_task", tree["task"].id),
+        ("schedule_task", tree["task"].id), ("toggle_task", tree["task"].id),
+        ("edit_block", tree["block"].id), ("delete_block", tree["block"].id),
+    ]
+
+
+POST_ONLY = ("toggle_task", "delete_block")
+BLOCK_DATA = {"status": "planned"}
+
+
+class OwnedTreeTestCase(TestCase):
     def setUp(self):
         User = get_user_model()
-
-        self.owner = User.objects.create_user(
-            username="owner",
-            password="test-password-123",
-        )
-
-        self.other_user = User.objects.create_user(
-            username="other",
-            password="test-password-123",
-        )
-
-        # Create a goal belonging to the owner.
-        goal = Goal.objects.create(
-            user=self.owner,
-            title="Learn Django",
-            category="education",
-            priority="high",
-            days_per_week=5,
-            hours_per_day=1,
-            start_date="2026-10-10",
-            target_date="2026-12-10",
-        )
-
-        roadmap = Roadmap.objects.create(
-            goal=goal,
-            title="Django Roadmap",
-        )
-
-        milestone = Milestone.objects.create(
-            roadmap=roadmap,
-            title="Learn the fundamentals",
-            order=1,
-        )
-
-        checkpoint = Checkpoint.objects.create(
-            milestone=milestone,
-            title="Build my first app",
-            order=1,
-        )
-
-        self.task = Task.objects.create(
-            checkpoint=checkpoint,
-            title="Learn Django testing",
-            status="pending",
-        )
-    
-
-    def test_owner_can_toggle_task(self):
+        self.owner = User.objects.create_user(username="owner", password=PASSWORD)
+        self.other = User.objects.create_user(username="other", password=PASSWORD)
+        self.tree = make_tree(self.owner)
         self.client.force_login(self.owner)
 
-        url = reverse("toggle_task", args=[self.task.id])
-        response = self.client.post(url)
-
-        self.task.refresh_from_db()
-
-        self.assertEqual(self.task.status, "completed")
-        self.assertIsNotNone(self.task.completed_at)
+    def counts(self):
+        return [m.objects.count() for m in (Goal, Phase, Step, Task, TimeBlock)]
 
 
-    def test_other_user_cannot_toggle_task(self): #fynctionality
-        self.client.force_login(self.other_user)
+# ---------------------------------------------------------------------------
+# Task completion (original suite, on the new structure)
+# ---------------------------------------------------------------------------
+class ToggleTaskTests(OwnedTreeTestCase):
+    def toggle(self, client=None):
+        return (client or self.client).post(reverse("toggle_task", args=[self.tree["task"].id]))
 
-        url = reverse("toggle_task", args=[self.task.id])
-        response = self.client.post(url)
+    def test_owner_can_toggle_and_undo_task(self):
+        task = self.tree["task"]
+        self.toggle()
+        task.refresh_from_db()
+        self.assertEqual(task.status, Task.DONE)
+        self.assertIsNotNone(task.completed_at)
 
-        self.assertEqual(response.status_code, 404)
-
-        self.task.refresh_from_db()
-        self.assertEqual(self.task.status, "pending")
-
-    
-    def test_other_user_cannot_delete_goal(self): #authorization
-        self.client.force_login(self.other_user)
-
-        url = reverse("delete_goal", args=[self.task.checkpoint.milestone.roadmap.goal.id])
-        response = self.client.post(url)
-
-        self.assertEqual(response.status_code, 404)
-        self.assertTrue(
-            Goal.objects.filter(
-                id=self.task.checkpoint.milestone.roadmap.goal.id,
-                user=self.owner,
-            ).exists()
-        )
-
-    
-    def test_owner_can_undo_completed_task(self):
-        self.task.status = "completed"
-        self.task.completed_at = "2026-10-10T10:00:00Z"
-        self.task.save()
-
-        self.client.force_login(self.owner)
-        url = reverse("toggle_task", args=[self.task.id])
-        response = self.client.post(url)
-
-        self.task.refresh_from_db()
-
+        response = self.toggle()
+        task.refresh_from_db()
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(self.task.status, "pending")
-        self.assertIsNone(self.task.completed_at)
+        self.assertEqual(task.status, Task.TODO)
+        self.assertIsNone(task.completed_at)
+
+    def test_other_user_cannot_toggle_task(self):
+        other = Client()
+        other.force_login(self.other)
+        self.assertEqual(self.toggle(other).status_code, 404)
+        self.tree["task"].refresh_from_db()
+        self.assertEqual(self.tree["task"].status, Task.TODO)
 
     def test_anonymous_user_cannot_toggle_task(self):
-        url = reverse("toggle_task", args=[self.task.id])
-        response = self.client.post(url)
+        self.assertEqual(self.toggle(Client()).status_code, 302)
+        self.tree["task"].refresh_from_db()
+        self.assertEqual(self.tree["task"].status, Task.TODO)
 
+    def test_toggle_returns_json_for_fetch(self):
+        response = self.client.post(
+            reverse("toggle_task", args=[self.tree["task"].id]),
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(response.json(), {"success": True, "status": "done"})
+
+
+# ---------------------------------------------------------------------------
+# Authorization boundaries
+# ---------------------------------------------------------------------------
+class CrossUserIsolationTests(OwnedTreeTestCase):
+    def test_other_user_gets_404_on_every_object_route_and_nothing_changes(self):
+        before = self.counts()
+        other = Client()
+        other.force_login(self.other)
+
+        for name, obj_id in object_routes(self.tree):
+            url = reverse(name, args=[obj_id])
+            with self.subTest(route=name, method="POST"):
+                self.assertEqual(other.post(url, {"title": "hijack"}).status_code, 404)
+            if name not in POST_ONLY:
+                with self.subTest(route=name, method="GET"):
+                    self.assertEqual(other.get(url).status_code, 404)
+
+        self.assertEqual(self.counts(), before)
+        self.tree["task"].refresh_from_db()
+        self.assertEqual(self.tree["task"].status, Task.TODO)
+        self.assertEqual(Goal.objects.get().title, "Learn Django")
+
+    def test_dashboard_and_calendar_only_show_own_data(self):
+        make_tree(self.other, title="Other users secret goal")
+        Task.objects.filter(step__phase__goal__user=self.other).update(title="Other users secret task")
+        for url in (reverse("dashboard"), reverse("goal_list"), reverse("calendar") + "?week=2026-11-02"):
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 200)
+                self.assertNotContains(response, "secret")
+
+    def test_other_users_blocks_do_not_cause_overlap(self):
+        other_tree = make_tree(self.other)
+        other_tree["block"].delete()
+        form = TimeBlockForm(
+            dict(BLOCK_DATA, date="2026-11-02", start_time="09:00", end_time="10:00"),
+            task=other_tree["task"],
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+
+
+class AnonymousAccessTests(OwnedTreeTestCase):
+    def test_every_page_redirects_anonymous_users_to_login(self):
+        anon = Client()
+        routes = [(name, [obj_id]) for name, obj_id in object_routes(self.tree)]
+        routes += [("dashboard", []), ("calendar", []), ("create_goal", []), ("goal_list", [])]
+        for name, args in routes:
+            url = reverse(name, args=args)
+            with self.subTest(route=name):
+                response = anon.post(url) if name in POST_ONLY else anon.get(url)
+                self.assertEqual(response.status_code, 302)
+                self.assertTrue(response["Location"].startswith(reverse("login")))
+        self.assertEqual(TimeBlock.objects.count(), 1)
+
+
+class HttpMethodTests(OwnedTreeTestCase):
+    def test_state_changing_endpoints_reject_get(self):
+        for name, obj_id in [("toggle_task", self.tree["task"].id), ("delete_block", self.tree["block"].id)]:
+            with self.subTest(route=name):
+                self.assertEqual(self.client.get(reverse(name, args=[obj_id])).status_code, 405)
+        self.assertEqual(self.client.get(reverse("logout")).status_code, 405)
+        self.assertEqual(TimeBlock.objects.count(), 1)
+
+    def test_get_on_delete_pages_only_confirms(self):
+        before = self.counts()
+        for level in ("goal", "phase", "step", "task"):
+            with self.subTest(level=level):
+                response = self.client.get(reverse(f"delete_{level}", args=[self.tree[level].id]))
+                self.assertEqual(response.status_code, 200)
+                self.assertTemplateUsed(response, "core/base.html")
+        self.assertEqual(self.counts(), before)
+
+    def test_csrf_is_enforced_on_toggle(self):
+        strict = Client(enforce_csrf_checks=True)
+        strict.force_login(self.owner)
+        response = strict.post(reverse("toggle_task", args=[self.tree["task"].id]))
+        self.assertEqual(response.status_code, 403)
+        self.tree["task"].refresh_from_db()
+        self.assertEqual(self.tree["task"].status, Task.TODO)
+
+
+class RedirectAndEscapingTests(OwnedTreeTestCase):
+    def test_login_ignores_external_next(self):
+        response = Client().post(
+            reverse("login") + "?next=https://evil.example/",
+            {"username": "owner", "password": PASSWORD},
+        )
         self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/")
 
-        self.task.refresh_from_db()
-        self.assertEqual(self.task.status, "pending")
-
-    def test_get_request_cannot_delete_goal(self):
-        self.client.force_login(self.owner)
-        goal_id = self.task.checkpoint.milestone.roadmap.goal.id
-
-        url = reverse("delete_goal", args=[goal_id])
-        response = self.client.get(url)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(
-            Goal.objects.filter(id=goal_id, user=self.owner).exists()
+    def test_toggle_from_parameter_only_allows_known_pages(self):
+        url = reverse("toggle_task", args=[self.tree["task"].id])
+        self.assertEqual(self.client.post(url + "?from=dashboard")["Location"], reverse("dashboard"))
+        self.assertEqual(self.client.post(url + "?from=calendar")["Location"], reverse("calendar"))
+        self.assertEqual(
+            self.client.post(url + "?from=https://evil.example/")["Location"],
+            reverse("goal_detail", args=[self.tree["goal"].id]),
         )
 
+    def test_user_content_is_escaped_everywhere(self):
+        payload = '<script>alert("x")</script>'
+        for key in ("goal", "phase", "step", "task"):
+            obj = self.tree[key]
+            obj.title = payload
+            obj.description = payload
+            obj.save()
+        for url in (reverse("goal_detail", args=[self.tree["goal"].id]), reverse("dashboard"),
+                    reverse("calendar") + "?week=2026-11-02",
+                    reverse("schedule_task", args=[self.tree["task"].id])):
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertNotContains(response, payload)
 
+
+# ---------------------------------------------------------------------------
+# Time blocks: validation, overlap, capacity warnings
+# ---------------------------------------------------------------------------
+class TimeBlockValidationTests(OwnedTreeTestCase):
+    def post_block(self, **data):
+        return self.client.post(reverse("schedule_task", args=[self.tree["task"].id]), dict(BLOCK_DATA, **data))
+
+    def test_missing_date_or_time_is_a_form_error_not_a_crash(self):
+        cases = {
+            "no date": {"start_time": "11:00", "end_time": "12:00"},
+            "no start": {"date": "2026-11-03", "end_time": "12:00"},
+            "no end": {"date": "2026-11-03", "start_time": "11:00"},
+            "bad time": {"date": "2026-11-03", "start_time": "nope", "end_time": "12:00"},
+        }
+        for label, data in cases.items():
+            with self.subTest(case=label):
+                response = self.post_block(**data)
+                self.assertEqual(response.status_code, 200)
+                self.assertTrue(response.context["form"].errors)
+        self.assertEqual(TimeBlock.objects.count(), 1)
+
+    def test_end_must_be_after_start(self):
+        response = self.post_block(date="2026-11-03", start_time="12:00", end_time="12:00")
+        self.assertContains(response, "End time must be later than start time.")
+        self.assertEqual(TimeBlock.objects.count(), 1)
+
+    def test_overlap_is_rejected_and_names_the_conflict(self):
+        response = self.post_block(date="2026-11-02", start_time="09:30", end_time="10:00")
+        self.assertContains(response, "overlaps with")
+        self.assertContains(response, "09:00–10:00")
+        self.assertEqual(TimeBlock.objects.count(), 1)
+
+    def test_touching_blocks_are_not_overlaps(self):
+        # 10:00-10:30 starts exactly when the 09:00-10:00 block ends. (It also
+        # exceeds the 1h/day plan, so it needs the capacity confirmation.)
+        response = self.post_block(date="2026-11-02", start_time="10:00", end_time="10:30",
+                                   confirm_over_capacity="on")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(TimeBlock.objects.count(), 2)
+
+    def test_can_overlap_blocks_do_not_conflict(self):
+        confirm = {"confirm_over_capacity": "on"}
+        response = self.post_block(date="2026-11-02", start_time="09:30", end_time="10:00",
+                                   allow_overlap="on", **confirm)
+        self.assertEqual(response.status_code, 302)
+        # An existing "can overlap" block does not block a normal one either.
+        block = TimeBlock.objects.exclude(pk=self.tree["block"].pk).get()
+        self.assertTrue(block.allow_overlap)
+        self.tree["block"].delete()
+        form = TimeBlockForm(dict(BLOCK_DATA, date="2026-11-02", start_time="09:00",
+                                  end_time="09:45", **confirm), task=self.tree["task"])
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_skipped_blocks_free_their_slot(self):
+        self.tree["block"].status = TimeBlock.SKIPPED
+        self.tree["block"].save()
+        response = self.post_block(date="2026-11-02", start_time="09:00", end_time="10:00")
+        self.assertEqual(response.status_code, 302)
+
+    def test_editing_a_block_does_not_conflict_with_itself(self):
+        block = self.tree["block"]
+        response = self.client.post(reverse("edit_block", args=[block.id]),
+                                    dict(BLOCK_DATA, date="2026-11-02", start_time="09:15", end_time="10:00"))
+        self.assertEqual(response.status_code, 302)
+        block.refresh_from_db()
+        self.assertEqual(block.start_time, datetime.time(9, 15))
+
+    def test_failed_edit_leaves_block_unchanged(self):
+        block = self.tree["block"]
+        response = self.client.post(reverse("edit_block", args=[block.id]),
+                                    dict(BLOCK_DATA, date="", start_time="11:00", end_time="10:00"))
+        self.assertEqual(response.status_code, 200)
+        block.refresh_from_db()
+        self.assertEqual(block.start_time, datetime.time(9, 0))
+
+
+class CapacityWarningTests(OwnedTreeTestCase):
+    """Goal plan: 1 hour/day, 5 days/week. One 1h block exists on Mon 2026-11-02."""
+
+    def post_block(self, **data):
+        return self.client.post(reverse("schedule_task", args=[self.tree["task"].id]), dict(BLOCK_DATA, **data))
+
+    def test_within_plan_saves_without_warning(self):
+        response = self.post_block(date="2026-11-03", start_time="09:00", end_time="10:00")
+        self.assertEqual(response.status_code, 302)
+
+    def test_over_daily_hours_warns_then_saves_when_confirmed(self):
+        response = self.post_block(date="2026-11-02", start_time="18:00", end_time="18:30")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "1h 30m of “Learn Django” on Mon Nov 02")
+        self.assertContains(response, "Schedule anyway")
+        self.assertEqual(TimeBlock.objects.count(), 1)
+
+        response = self.post_block(date="2026-11-02", start_time="18:00", end_time="18:30",
+                                   confirm_over_capacity="on")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(TimeBlock.objects.count(), 2)
+
+    def test_over_days_per_week_warns(self):
+        for day in (3, 4, 5, 6):  # Tue-Fri -> 5 days used
+            TimeBlock.objects.create(task=self.tree["task"], date=f"2026-11-0{day}",
+                                     start_time="09:00", end_time="09:30")
+        response = self.post_block(date="2026-11-07", start_time="09:00", end_time="09:30")
+        self.assertContains(response, "6 days of “Learn Django” in the week of Nov 02")
+        # A different week is fine.
+        response = self.post_block(date="2026-11-09", start_time="09:00", end_time="09:30")
+        self.assertEqual(response.status_code, 302)
+
+    def test_no_schedule_anyway_toggle_when_within_plan(self):
+        response = self.client.get(reverse("schedule_task", args=[self.tree["task"].id]))
+        self.assertNotContains(response, "Schedule anyway")
+
+
+class MissedStatusTests(OwnedTreeTestCase):
+    def setUp(self):
+        super().setUp()
+        self.tree["block"].refresh_from_db()  # load real date/time objects
+
+    def test_planned_block_in_the_past_shows_as_missed_until_task_is_done(self):
+        block = self.tree["block"]  # 2026-11-02 09:00-10:00
+        later = timezone.make_aware(datetime.datetime(2026, 11, 2, 12, 0))
+        with mock.patch("django.utils.timezone.now", return_value=later):
+            self.assertEqual(block.effective_status, TimeBlock.MISSED)
+            self.tree["task"].status = Task.DONE
+            self.tree["task"].save()
+            block.refresh_from_db()
+            self.assertEqual(block.effective_status, TimeBlock.PLANNED)
+
+    def test_future_block_is_planned(self):
+        earlier = timezone.make_aware(datetime.datetime(2026, 11, 2, 8, 0))
+        with mock.patch("django.utils.timezone.now", return_value=earlier):
+            self.assertEqual(self.tree["block"].effective_status, TimeBlock.PLANNED)
+
+
+class DerivedStatusTests(OwnedTreeTestCase):
+    def test_phase_and_step_status_follow_tasks(self):
+        phase, step, task = self.tree["phase"], self.tree["step"], self.tree["task"]
+        self.assertEqual((phase.status, step.status), ("not_started", "not_started"))
+        task.status = Task.DOING
+        task.save()
+        self.assertEqual((phase.status, step.status), ("in_progress", "in_progress"))
+        Task.objects.create(step=step, title="Second", status=Task.DONE)
+        task.status = Task.DONE
+        task.save()
+        self.assertEqual((phase.status, step.status), ("done", "done"))
+        self.assertEqual(phase.progress, 100)
+
+
+# ---------------------------------------------------------------------------
+# Goals, calendar and pages
+# ---------------------------------------------------------------------------
+class GoalFormValidationTests(TestCase):
+    base = {"title": "Run a 10k", "category": "health", "priority": "medium",
+            "days_per_week": 3, "hours_per_day": 1, "status": "active"}
+
+    def test_missing_dates_are_field_errors_not_a_crash(self):
+        for missing in ("start_date", "target_date"):
+            data = dict(self.base, start_date="2026-11-01", target_date="2026-12-01")
+            data.pop(missing)
+            with self.subTest(missing=missing):
+                form = GoalForm(data)
+                self.assertFalse(form.is_valid())
+                self.assertIn(missing, form.errors)
+
+    def test_target_before_start_is_reported_on_target_date(self):
+        form = GoalForm(dict(self.base, start_date="2026-12-01", target_date="2026-11-01"))
+        self.assertFalse(form.is_valid())
+        self.assertIn("target_date", form.errors)
+
+    def test_failed_create_saves_nothing_and_shows_each_error_once(self):
+        user = get_user_model().objects.create_user(username="u", password=PASSWORD)
+        self.client.force_login(user)
+        response = self.client.post(reverse("create_goal"),
+                                    dict(self.base, start_date="2026-12-01", target_date="2026-11-01"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Goal.objects.count(), 0)
+        self.assertContains(response, "Target date must be after the start date.", count=1)
+
+    def test_out_of_range_values_are_rejected(self):
+        for field, value in (("days_per_week", 8), ("days_per_week", 0),
+                             ("hours_per_day", 25), ("hours_per_day", 0)):
+            with self.subTest(field=field, value=value):
+                form = GoalForm(dict(self.base, start_date="2026-11-01",
+                                     target_date="2026-12-01", **{field: value}))
+                self.assertFalse(form.is_valid())
+                self.assertIn(field, form.errors)
+
+
+class CalendarWeekTests(OwnedTreeTestCase):
+    def get_week(self, value):
+        return self.client.get(reverse("calendar") + f"?week={value}")
+
+    def test_any_date_snaps_to_monday_through_sunday(self):
+        response = self.get_week("2026-11-04")  # a Wednesday
+        self.assertEqual(response.context["start_date"], datetime.date(2026, 11, 2))
+        self.assertEqual(response.context["end_date"], datetime.date(2026, 11, 8))
+        self.assertEqual(response.context["previous_week"], datetime.date(2026, 10, 26))
+        self.assertEqual(response.context["next_week"], datetime.date(2026, 11, 9))
+        self.assertEqual(response.context["week_minutes"], 60)
+        self.assertContains(response, "Task")
+
+    def test_extreme_or_invalid_weeks_fall_back_to_current_week(self):
+        current = self.client.get(reverse("calendar")).context["start_date"]
+        self.assertEqual(current.weekday(), 0)
+        for value in ("9999-12-31", "0001-01-01", "garbage", "2026-02-30"):
+            with self.subTest(week=value):
+                response = self.get_week(value)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.context["start_date"], current)
+
+
+class PageTests(OwnedTreeTestCase):
+    def test_edit_form_status_keeps_completed_at_in_sync(self):
+        task = self.tree["task"]
+        url = reverse("edit_task", args=[task.id])
+        data = {"title": "Task", "description": "", "estimated_minutes": 30}
+        self.client.post(url, dict(data, status="done"))
+        task.refresh_from_db()
+        self.assertIsNotNone(task.completed_at)
+        self.client.post(url, dict(data, status="doing"))
+        task.refresh_from_db()
+        self.assertIsNone(task.completed_at)
+
+    def test_add_phase_is_available_when_phases_exist(self):
+        response = self.client.get(reverse("goal_detail", args=[self.tree["goal"].id]))
+        self.assertContains(response, reverse("create_phase", args=[self.tree["goal"].id]))
+
+    def test_descriptions_are_multiline(self):
+        for name, obj in (("create_phase", "goal"), ("create_step", "phase"), ("create_task", "step")):
+            with self.subTest(page=name):
+                response = self.client.get(reverse(name, args=[self.tree[obj].id]))
+                self.assertContains(response, '<textarea name="description"')
+
+    def test_success_message_after_create(self):
+        response = self.client.post(reverse("create_phase", args=[self.tree["goal"].id]),
+                                    {"title": "Build", "description": "", "order": 2}, follow=True)
+        self.assertContains(response, "Phase added.")
+
+    def test_add_and_schedule_goes_straight_to_scheduling(self):
+        response = self.client.post(reverse("create_task", args=[self.tree["step"].id]),
+                                    {"title": "New", "description": "", "estimated_minutes": 30,
+                                     "status": "todo", "then": "schedule"})
+        task = Task.objects.get(title="New")
+        self.assertRedirects(response, reverse("schedule_task", args=[task.id]))
+
+    def test_goal_page_queries_do_not_grow_with_tasks(self):
+        url = reverse("goal_detail", args=[self.tree["goal"].id])
+        # session, user, goal, phases, steps, tasks, blocks
+        with self.assertNumQueries(7):
+            self.client.get(url)
+        for i in range(5):
+            Task.objects.create(step=self.tree["step"], title=f"Extra {i}")
+        Phase.objects.create(goal=self.tree["goal"], title="Another phase", order=2)
+        with self.assertNumQueries(7):
+            self.client.get(url)
+
+
+class CascadeTests(OwnedTreeTestCase):
+    def test_each_level_deletes_everything_below_it(self):
+        # Remaining [Goal, Phase, Step, Task, TimeBlock] counts.
+        expected_after = {
+            "task": [1, 1, 1, 0, 0], "step": [1, 1, 0, 0, 0],
+            "phase": [1, 0, 0, 0, 0], "goal": [0, 0, 0, 0, 0],
+        }
+        for level, expected in expected_after.items():
+            with self.subTest(level=level):
+                Goal.objects.all().delete()
+                tree = make_tree(self.owner)
+                response = self.client.post(reverse(f"delete_{level}", args=[tree[level].id]))
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(self.counts(), expected)
+
+    def test_removing_a_block_keeps_the_task(self):
+        response = self.client.post(reverse("delete_block", args=[self.tree["block"].id]))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.counts(), [1, 1, 1, 1, 0])
+
+
+class GoalListAndFormattingTests(OwnedTreeTestCase):
+    def test_goal_list_shows_own_goals_with_progress(self):
+        self.tree["task"].status = Task.DONE
+        self.tree["task"].save()
+        make_tree(self.other, title="Not mine")
+        response = self.client.get(reverse("goal_list"))
+        self.assertContains(response, "Learn Django")
+        self.assertNotContains(response, "Not mine")
+        self.assertContains(response, "1/1")
+        self.assertContains(response, 'aria-label="100% of tasks done"')
+
+    def test_goal_list_empty_state_teaches_next_step(self):
+        Goal.objects.all().delete()
+        response = self.client.get(reverse("goal_list"))
+        self.assertContains(response, "Set your first goal")
+
+    def test_duration_filter(self):
+        from core.templatetags.planner import duration
+        self.assertEqual([duration(m) for m in (0, 45, 60, 105, "x")], ["0m", "45m", "1h", "1h 45m", ""])
+
+    def test_pages_have_no_banned_decoration(self):
+        # Guard the design direction: no heading kickers, gradient text or progress rings.
+        urls = [reverse("dashboard"), reverse("goal_list"), reverse("calendar"),
+                reverse("goal_detail", args=[self.tree["goal"].id]),
+                reverse("schedule_task", args=[self.tree["task"].id])]
+        for url in urls:
+            with self.subTest(url=url):
+                html = self.client.get(url).content.decode()
+                for banned in ('class="eyebrow"', "gradient-text", 'class="ring'):
+                    self.assertNotIn(banned, html)
+
+
+# ---------------------------------------------------------------------------
+# Complete user journeys
+# ---------------------------------------------------------------------------
+class UserJourneyTests(TestCase):
+    def test_register_plan_schedule_and_complete(self):
+        c = Client()
+        response = c.post(reverse("register"), {
+            "username": "newuser", "password1": "a-Strong-pass-981", "password2": "a-Strong-pass-981"})
+        self.assertRedirects(response, reverse("login"))
+        response = c.post(reverse("login"), {"username": "newuser", "password": "a-Strong-pass-981"})
+        self.assertRedirects(response, reverse("dashboard"))
+        self.assertContains(c.get(reverse("dashboard")), "set a goal yet.")
+
+        response = c.post(reverse("create_goal"), {
+            "title": "Ship LifeGrid", "description": "Launch it publicly", "category": "projects",
+            "priority": "high", "days_per_week": 5, "hours_per_day": 2,
+            "start_date": "2026-11-01", "target_date": "2026-12-31", "status": "active"})
+        goal = Goal.objects.get(title="Ship LifeGrid")
+        self.assertRedirects(response, reverse("goal_detail", args=[goal.id]))
+        self.assertEqual(goal.user.username, "newuser")
+
+        for i in (1, 2):
+            c.post(reverse("create_phase", args=[goal.id]), {"title": f"Phase {i}", "description": "", "order": i})
+        self.assertEqual(goal.phases.count(), 2)
+        phase = goal.phases.get(order=1)
+        c.post(reverse("create_step", args=[phase.id]), {"title": "Fix bugs", "description": "", "order": 1})
+        step = phase.steps.get()
+        c.post(reverse("create_task", args=[step.id]),
+               {"title": "Write tests", "description": "", "estimated_minutes": 60, "status": "todo"})
+        task = step.tasks.get()
+
+        response = c.post(reverse("schedule_task", args=[task.id]), dict(
+            BLOCK_DATA, date="2026-11-04", start_time="18:00", end_time="19:00"))
+        self.assertRedirects(response, reverse("goal_detail", args=[goal.id]))
+        self.assertContains(c.get(reverse("calendar") + "?week=2026-11-04"), "Write tests")
+
+        c.post(reverse("toggle_task", args=[task.id]))
+        detail = c.get(reverse("goal_detail", args=[goal.id]))
+        self.assertEqual(detail.context["progress"], 100)
+
+        self.assertRedirects(c.post(reverse("logout")), reverse("login"))
+        self.assertEqual(c.get(reverse("dashboard")).status_code, 302)
+
+    def test_registration_rejects_weak_or_mismatched_passwords(self):
+        for p1, p2 in (("short", "short"), ("a-Strong-pass-981", "different-pass-981"),
+                       ("12345678", "12345678")):
+            with self.subTest(p1=p1):
+                response = self.client.post(reverse("register"), {"username": "x", "password1": p1, "password2": p2})
+                self.assertEqual(response.status_code, 200)
+        self.assertFalse(get_user_model().objects.filter(username="x").exists())
+
+    def test_wrong_password_does_not_log_in(self):
+        get_user_model().objects.create_user(username="u", password=PASSWORD)
+        response = self.client.post(reverse("login"), {"username": "u", "password": "wrong"})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.wsgi_request.user.is_authenticated)
+
+
+# ---------------------------------------------------------------------------
+# The restructure migration keeps existing data
+# ---------------------------------------------------------------------------
+class RestructureMigrationTests(TransactionTestCase):
+    before = [("core", "0005_remove_goal_goal_type_goal_category_and_more")]
+    after = [("core", "0008_new_statuses_and_overlap")]
+
+    def test_old_data_is_converted_without_loss(self):
+        # Safety guard: this test migrates the schema back and forth, so it must
+        # only ever run against the throwaway test database, never a real one.
+        db_name = str(connection.settings_dict["NAME"])
+        if not (connection.is_in_memory_db() or "test" in db_name.lower()):
+            self.fail(f"Refusing to run migration test against non-test database {db_name!r}")
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.before)
+        old = executor.loader.project_state(self.before).apps
+
+        user = old.get_model("auth", "User").objects.create(username="legacy")
+        goal = old.get_model("core", "Goal").objects.create(
+            user=user, title="Old goal", days_per_week=3, hours_per_day=1,
+            start_date="2026-10-01", target_date="2026-12-01")
+        bare_goal = old.get_model("core", "Goal").objects.create(
+            user=user, title="Goal without roadmap", days_per_week=2, hours_per_day=1,
+            start_date="2026-10-01", target_date="2026-12-01")
+        roadmap = old.get_model("core", "Roadmap").objects.create(
+            goal=goal, title="Old roadmap", description="Roadmap notes")
+        milestone = old.get_model("core", "Milestone").objects.create(
+            roadmap=roadmap, title="Old milestone", order=2, status="completed")
+        checkpoint = old.get_model("core", "Checkpoint").objects.create(
+            milestone=milestone, title="Old checkpoint", order=1)
+        Task = old.get_model("core", "Task")
+        tasks = {s: Task.objects.create(checkpoint=checkpoint, title=f"T-{s}", status=s)
+                 for s in ("pending", "in_progress", "completed")}
+        Schedule = old.get_model("core", "Schedule")
+        schedules = {s: Schedule.objects.create(task=tasks["pending"], date="2026-11-02",
+                                                start_time=f"0{i}:00", end_time=f"0{i}:30", status=s)
+                     for i, s in enumerate(("scheduled", "completed", "skipped"), start=1)}
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.after)
+        new = executor.loader.project_state(self.after).apps
+
+        NewGoal = new.get_model("core", "Goal")
+        self.assertEqual(NewGoal.objects.get(pk=goal.pk).description, "Roadmap notes")
+        self.assertEqual(NewGoal.objects.get(pk=bare_goal.pk).description, "")
+
+        phase = new.get_model("core", "Phase").objects.get(pk=milestone.pk)
+        self.assertEqual((phase.title, phase.order, phase.goal_id), ("Old milestone", 2, goal.pk))
+        step = new.get_model("core", "Step").objects.get(pk=checkpoint.pk)
+        self.assertEqual((step.title, step.phase_id), ("Old checkpoint", phase.pk))
+
+        NewTask = new.get_model("core", "Task")
+        self.assertEqual(
+            {old_s: NewTask.objects.get(pk=t.pk).status for old_s, t in tasks.items()},
+            {"pending": "todo", "in_progress": "doing", "completed": "done"},
+        )
+        self.assertTrue(all(NewTask.objects.get(pk=t.pk).step_id == step.pk for t in tasks.values()))
+
+        Block = new.get_model("core", "TimeBlock")
+        self.assertEqual(
+            {old_s: Block.objects.get(pk=s.pk).status for old_s, s in schedules.items()},
+            {"scheduled": "planned", "completed": "done", "skipped": "skipped"},
+        )
+        self.assertEqual(Block.objects.filter(allow_overlap=False).count(), 3)

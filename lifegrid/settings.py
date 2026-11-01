@@ -12,19 +12,58 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
-# Quick-start development settings - unsuitable for production
+def env_bool(name, default):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def env_list(name):
+    return [item.strip() for item in os.environ.get(name, "").split(",") if item.strip()]
+
+
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
+#
+# Local development works with no environment variables at all.
+# For a public deployment set DJANGO_DEBUG=0, which then REQUIRES
+# DJANGO_SECRET_KEY and DJANGO_ALLOWED_HOSTS and enables HTTPS-only settings.
+
+# SECURITY WARNING: don't run with debug turned on in production!
+DEBUG = env_bool("DJANGO_DEBUG", True)
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-secret-key")
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set when DJANGO_DEBUG=0.")
+    SECRET_KEY = "dev-only-insecure-key-do-not-use-in-production"
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS")
+if not DEBUG and not ALLOWED_HOSTS:
+    raise ImproperlyConfigured("DJANGO_ALLOWED_HOSTS must be set when DJANGO_DEBUG=0.")
+
+# Needed when the site is served over HTTPS on a custom domain,
+# e.g. DJANGO_CSRF_TRUSTED_ORIGINS=https://lifegrid.example.com
+CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
+
+if not DEBUG:
+    SECURE_SSL_REDIRECT = env_bool("DJANGO_SECURE_SSL_REDIRECT", True)
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_SECURE_HSTS_SECONDS", "3600"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS", False)
+    SECURE_HSTS_PRELOAD = False
+    SECURE_REFERRER_POLICY = "same-origin"
+    # Most PaaS hosts terminate TLS at a proxy; only trust its header when told to.
+    if env_bool("DJANGO_BEHIND_TLS_PROXY", False):
+        SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 
 # Application definition
@@ -104,7 +143,9 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+# "Today" on the dashboard/calendar follows this zone. Set
+# DJANGO_TIME_ZONE=Asia/Kolkata for Indian time. Stored datetimes stay UTC.
+TIME_ZONE = os.environ.get("DJANGO_TIME_ZONE", "UTC")
 
 USE_I18N = True
 
@@ -115,6 +156,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 
 # Email

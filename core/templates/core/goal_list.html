@@ -1,0 +1,17 @@
+{% extends "core/base.html" %}
+
+{% block title %}Goals · LifeGrid{% endblock %}
+
+{% block content %}
+<header class="page-head">
+    <div>
+        <h1 class="display">Goals</h1>
+        <p class="sub">Everything you're working towards, nearest deadline first.</p>
+    </div>
+    <a class="btn btn-primary" href="{% url 'create_goal' %}">New goal</a>
+</header>
+
+<section class="section">
+    {% include "core/goal_rows.html" %}
+</section>
+{% endblock %}

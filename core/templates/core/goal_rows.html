@@ -1,0 +1,21 @@
+{% if goals %}
+<ul class="goal-rows">
+    {% for goal in goals %}
+    <li class="goal-row pg-{{ goal.pigment }}">
+        <a class="goal-row-link" href="{% url 'goal_detail' goal.id %}">
+            <span class="goal-row-title"><span class="swatch" aria-hidden="true"></span>{{ goal.title }}</span>
+            <span class="goal-row-meta">{{ goal.get_category_display }}{% if goal.status != "active" %} · {{ goal.get_status_display }}{% endif %}</span>
+        </a>
+        <span class="meter" role="img" aria-label="{{ goal.progress }}% of tasks done"><span style="width: {{ goal.progress }}%"></span></span>
+        <span class="goal-row-count">{{ goal.done_count }}/{{ goal.task_count }}</span>
+        <span class="goal-row-date" title="Target date">{{ goal.target_date|date:"M j" }}</span>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<div class="empty">
+    <p class="empty-title">You haven't set a goal yet.</p>
+    <p>Start with one thing you want to finish. You'll split it into phases, then steps, then small tasks you can put on the calendar.</p>
+    <a class="btn btn-primary" href="{% url 'create_goal' %}">Set your first goal</a>
+</div>
+{% endif %}
