@@ -20,6 +20,8 @@
             </dl>
         </div>
         <div class="head-actions">
+            {% if total_tasks %}<a href="{% url 'auto_schedule' goal.id %}" class="btn btn-primary">Plan my weeks</a>{% endif %}
+            <a href="{% url 'draft_plan' goal.id %}" class="btn btn-secondary">Draft with AI</a>
             <a href="{% url 'edit_goal' goal.id %}" class="btn btn-secondary">Edit</a>
             <a href="{% url 'delete_goal' goal.id %}" class="btn btn-quiet btn-danger-text">Delete</a>
         </div>
@@ -101,6 +103,7 @@
         <p class="empty-title">This goal has no phases yet.</p>
         <p>A phase is a big stage of the goal, like “Fundamentals” or “Build a project”. Inside each phase you'll add steps, and inside each step the tasks you'll put on your calendar.</p>
         <a href="{% url 'create_phase' goal.id %}" class="btn btn-primary">Add the first phase</a>
+        <a href="{% url 'draft_plan' goal.id %}" class="btn btn-secondary">Draft with AI</a>
     </div>
     {% endfor %}
 

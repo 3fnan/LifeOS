@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from django import forms
 
+from .ai_draft import LEVELS
 from .models import Goal, Phase, Step, Task, TimeBlock
 
 
@@ -77,6 +78,53 @@ class TaskForm(forms.ModelForm):
             "description": forms.Textarea(attrs={"rows": 3, "placeholder": "Any details or links?"}),
             "estimated_minutes": forms.NumberInput(attrs={"min": 1, "step": 5}),
         }
+
+
+class AutoScheduleForm(forms.Form):
+    start_date = forms.DateField(
+        label="Start from",
+        widget=forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
+    )
+    window_start = forms.TimeField(
+        label="Earliest start",
+        widget=forms.TimeInput(attrs={"type": "time"}, format="%H:%M"),
+    )
+    window_end = forms.TimeField(
+        label="Latest finish",
+        help_text="Blocks are placed only between these two times.",
+        widget=forms.TimeInput(attrs={"type": "time"}, format="%H:%M"),
+    )
+
+    def __init__(self, *args, goal, today, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.goal = goal
+        self.today = today
+
+    def clean(self):
+        cleaned_data = super().clean()
+        start_date = cleaned_data.get("start_date")
+        window_start = cleaned_data.get("window_start")
+        window_end = cleaned_data.get("window_end")
+
+        if window_start and window_end and window_end <= window_start:
+            raise forms.ValidationError("The latest finish must be later than the earliest start.")
+        if start_date:
+            if start_date < self.today:
+                self.add_error("start_date", "Pick today or a later date.")
+            elif start_date > self.goal.target_date:
+                self.add_error("start_date", f"This goal's target date is {self.goal.target_date:%d %b %Y}.")
+        return cleaned_data
+
+
+class DraftPlanForm(forms.Form):
+    level = forms.ChoiceField(label="Where are you starting from?", choices=LEVELS)
+    outline = forms.CharField(
+        label="Draft",
+        required=False,
+        help_text="Edit freely. “# ” starts a phase, “## ” a step, “- ” a task; "
+                  "put the time at the end, like “(45 min)”.",
+        widget=forms.Textarea(attrs={"rows": 18, "spellcheck": "true"}),
+    )
 
 
 class TimeBlockForm(forms.ModelForm):

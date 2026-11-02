@@ -19,6 +19,61 @@
     </div>
 </header>
 
+<section class="stats" aria-label="Your progress">
+    <div class="stat">
+        <p class="stat-label">{% include "core/icon.html" with name="bolt" size=14 %}Streak</p>
+        <p class="stat-value">{{ streak }} day{{ streak|pluralize }}</p>
+        <p class="stat-sub">Days with nothing planned don't break it</p>
+    </div>
+    <div class="stat">
+        <p class="stat-label">{% include "core/icon.html" with name="clock" size=14 %}This week</p>
+        <p class="stat-value">{{ week.done|duration }} <span>/ {{ week.budget|duration }}</span></p>
+        <span class="meter" role="img" aria-label="{{ week_percent }}% of this week's planned hours done"><span style="width: {{ week_percent }}%"></span></span>
+    </div>
+    <div class="stat{% if risks %} stat-warn{% endif %}">
+        <p class="stat-label">{% include "core/icon.html" with name="alert" size=14 %}At risk</p>
+        <p class="stat-value">{{ risks|length }} goal{{ risks|length|pluralize }}</p>
+        <p class="stat-sub">{% if risks %}{{ risks.0.goal.title }}: {{ risks.0.short|duration }} short{% else %}Every goal fits its deadline{% endif %}</p>
+    </div>
+    <div class="stat{% if slipped %} stat-danger{% endif %}">
+        <p class="stat-label">{% include "core/icon.html" with name="x" size=14 %}Skipped or missed</p>
+        <p class="stat-value">{{ slipped|length }}</p>
+        <p class="stat-sub">{% if slipped %}This week, see below{% else %}Nothing slipped this week{% endif %}</p>
+    </div>
+</section>
+
+{% if risks or slipped %}
+<section class="section" aria-labelledby="attention-heading">
+    <div class="section-head">
+        <h2 id="attention-heading">Needs attention</h2>
+    </div>
+    <ul class="attention">
+        {% for risk in risks %}
+        <li class="attention-row pg-{{ risk.goal.pigment }}">
+            <span class="state state-skipped">{% if risk.overdue %}Overdue{% else %}At risk{% endif %}</span>
+            <span class="attention-main">
+                <a class="task-name" href="{% url 'goal_detail' risk.goal.id %}"><span class="swatch" aria-hidden="true"></span>{{ risk.goal.title }}</a>
+                <span class="attention-meta">{{ risk.needed|duration }} of tasks left, about {{ risk.capacity|duration }} of time before {{ risk.goal.target_date|date:"j M" }}</span>
+            </span>
+            <a class="btn btn-secondary btn-sm" href="{% url 'edit_goal' risk.goal.id %}">Adjust goal</a>
+        </li>
+        {% endfor %}
+        {% for block in slipped %}
+        {% with goal=block.task.step.phase.goal %}
+        <li class="attention-row pg-{{ goal.pigment }}">
+            <span class="state state-{{ block.effective_status }}">{{ block.effective_status_label }}</span>
+            <span class="attention-main">
+                <span class="task-name">{{ block.task.title }}</span>
+                <span class="attention-meta"><span class="swatch" aria-hidden="true"></span>{{ goal.title }} · {{ block.date|date:"D j M" }}, {{ block.start_time|time:"H:i" }}</span>
+            </span>
+            <a class="btn btn-secondary btn-sm" href="{% url 'edit_block' block.id %}">Reschedule</a>
+        </li>
+        {% endwith %}
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
+
 <section class="section" aria-labelledby="today-heading" data-progress-scope>
     <div class="section-head">
         <h2 id="today-heading">Today</h2>

@@ -13,6 +13,8 @@ urlpatterns = [
     path("goals/<int:goal_id>/edit/", views.edit_goal, name="edit_goal"),
     path("goals/<int:goal_id>/delete/", views.delete_goal, name="delete_goal"),
     path("goals/<int:goal_id>/phases/new/", views.create_phase, name="create_phase"),
+    path("goals/<int:goal_id>/plan/", views.auto_schedule, name="auto_schedule"),
+    path("goals/<int:goal_id>/draft/", views.draft_plan, name="draft_plan"),
 
     path("phases/<int:phase_id>/edit/", views.edit_phase, name="edit_phase"),
     path("phases/<int:phase_id>/delete/", views.delete_phase, name="delete_phase"),

@@ -1,0 +1,60 @@
+{% extends "core/base.html" %}
+
+{% block title %}Draft with AI · LifeGrid{% endblock %}
+
+{% block content %}
+<div class="form-page form-page-wide pg-{{ goal.pigment }}">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="{% url 'goal_detail' goal.id %}">{{ goal.title }}</a></nav>
+
+    <header class="form-head">
+        <h1 class="display">Draft with AI</h1>
+        <p class="sub">Suggests phases, steps and tasks for this goal. You can edit the draft before anything is saved, and it's added after any phases you already have.</p>
+        <p class="hint">Uses only this goal's title and description, your level, and your time budget.</p>
+    </header>
+
+    <form method="post" class="form" novalidate data-busy-form>
+        {% csrf_token %}
+
+        {% if draft_error %}
+        <div class="notice notice-error" role="alert">
+            <p class="notice-title">{{ draft_error }}</p>
+            <p>You can still <a href="{% url 'create_phase' goal.id %}">add phases yourself</a>{% if goal.phases.exists %} or <a href="{% url 'auto_schedule' goal.id %}">plan your weeks</a> with the tasks you have{% endif %}.</p>
+        </div>
+        {% endif %}
+
+        {% if outline_errors %}
+        <div class="notice notice-error" role="alert">
+            <p class="notice-title">Fix the draft before saving.</p>
+            <ul>{% for error in outline_errors %}<li>{{ error }}</li>{% endfor %}</ul>
+        </div>
+        {% endif %}
+
+        <div class="fields">
+            <div class="field field-half{% if form.level.errors %} has-error{% endif %}">
+                <label for="{{ form.level.id_for_label }}">{{ form.level.label }}</label>
+                {{ form.level }}
+                {% for error in form.level.errors %}<small class="field-error">{{ error }}</small>{% endfor %}
+            </div>
+            {% if has_draft %}
+            <div class="field field-full" data-outline-field>
+                <label for="{{ form.outline.id_for_label }}">{{ form.outline.label }}</label>
+                {{ form.outline }}
+                <small class="help">{{ form.outline.help_text }}</small>
+            </div>
+            {% endif %}
+        </div>
+
+        <p class="busy-status" data-busy-status role="status" aria-live="polite" hidden></p>
+
+        <div class="form-actions">
+            {% if has_draft %}
+            <button type="submit" name="then" value="save" class="btn btn-primary" data-busy-label="Saving…" data-busy-status-text="Saving your plan…">Save to goal</button>
+            <button type="submit" class="btn btn-secondary" data-busy-label="Drafting…" data-busy-status-text="Drafting a new plan. This usually takes 5–15 seconds.">Draft again</button>
+            {% else %}
+            <button type="submit" class="btn btn-primary" data-busy-label="Drafting…" data-busy-status-text="Drafting your plan. This usually takes 5–15 seconds.">Draft a plan</button>
+            {% endif %}
+            <a href="{% url 'goal_detail' goal.id %}" class="btn btn-quiet">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import time, timedelta
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -10,8 +10,10 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from .forms import GoalForm, PhaseForm, StepForm, TaskForm, TimeBlockForm
+from . import ai_draft, stats
+from .forms import AutoScheduleForm, DraftPlanForm, GoalForm, PhaseForm, StepForm, TaskForm, TimeBlockForm
 from .models import Goal, Phase, Step, Task, TimeBlock
+from .scheduler import plan_goal
 
 # Ownership lookups: every object is reached through its goal's user.
 TASK_OWNER = "step__phase__goal__user"
@@ -95,7 +97,13 @@ def dashboard(request):
     hour = timezone.localtime().hour
     greeting = "Good morning" if hour < 12 else "Good afternoon" if hour < 17 else "Good evening"
 
+    week = stats.week_hours(request.user, today)
     return render(request, "core/dashboard.html", {
+        "streak": stats.streak(request.user, today),
+        "week": week,
+        "week_percent": min(100, round(week["done"] / week["budget"] * 100)) if week["budget"] else 0,
+        "risks": stats.goals_at_risk(request.user, today),
+        "slipped": stats.skipped_and_missed(request.user, today),
         "greeting": greeting,
         "today": today,
         "active_goals": sum(1 for goal in goals if goal.status == "active"),
@@ -239,6 +247,79 @@ def delete_goal(request, goal_id):
         warning="This also deletes all of its phases, steps, tasks and time blocks.",
         cancel_url=reverse("goal_detail", args=[goal.id]),
     )
+
+
+@login_required
+def auto_schedule(request, goal_id):
+    """Preview, then save, an automatic plan for the goal's unscheduled tasks."""
+    goal = get_object_or_404(Goal, id=goal_id, user=request.user)
+    today = timezone.localdate()
+    plan = None
+    if request.method == "POST":
+        form = AutoScheduleForm(request.POST, goal=goal, today=today)
+        if form.is_valid():
+            plan = plan_goal(
+                goal,
+                start_date=form.cleaned_data["start_date"],
+                window_start=form.cleaned_data["window_start"],
+                window_end=form.cleaned_data["window_end"],
+                now=timezone.localtime(),
+            )
+            if request.POST.get("then") == "save" and plan.blocks:
+                TimeBlock.objects.bulk_create(plan.blocks)
+                count = len(plan.blocks)
+                messages.success(request, f"Added {count} time block{'s' if count != 1 else ''} to your calendar.")
+                return redirect("goal_detail", goal_id=goal.id)
+    else:
+        form = AutoScheduleForm(goal=goal, today=today, initial={
+            "start_date": max(today, goal.start_date),
+            "window_start": time(18, 0),
+            "window_end": time(21, 0),
+        })
+    return render(request, "core/auto_schedule.html", {
+        "goal": goal,
+        "form": form,
+        "plan": plan,
+        "plan_minutes": sum(b.duration_minutes for b in plan.blocks) if plan else 0,
+    })
+
+
+@login_required
+def draft_plan(request, goal_id):
+    """Ask Gemini for phases/steps/tasks, let the user edit the outline, then save it."""
+    goal = get_object_or_404(Goal, id=goal_id, user=request.user)
+    draft_error, outline_errors = None, []
+    if request.method == "POST":
+        form = DraftPlanForm(request.POST)
+        if form.is_valid():
+            if request.POST.get("then") == "save":
+                phases, outline_errors = ai_draft.parse_outline(form.cleaned_data["outline"])
+                if not outline_errors:
+                    count = ai_draft.save_outline(goal, phases)
+                    messages.success(
+                        request,
+                        f"Added {len(phases)} phase{'s' if len(phases) != 1 else ''} and "
+                        f"{count} task{'s' if count != 1 else ''}. Use “Plan my weeks” to put them on your calendar.",
+                    )
+                    return redirect("goal_detail", goal_id=goal.id)
+            else:
+                try:
+                    phases = ai_draft.draft_plan(goal, form.cleaned_data["level"])
+                except ai_draft.DraftError as error:
+                    draft_error = str(error)
+                else:
+                    data = request.POST.copy()
+                    data["outline"] = ai_draft.to_outline(phases)
+                    form = DraftPlanForm(data)
+    else:
+        form = DraftPlanForm()
+    return render(request, "core/draft_plan.html", {
+        "goal": goal,
+        "form": form,
+        "has_draft": bool(form["outline"].value()),
+        "draft_error": draft_error,
+        "outline_errors": outline_errors,
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -417,6 +498,13 @@ def toggle_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, **{TASK_OWNER: request.user})
     task.status = Task.TODO if task.status == Task.DONE else Task.DONE
     task.save()
+    # The task's sessions up to today follow the tick, so streaks and weekly
+    # hours count them. Future sessions are left alone.
+    past_blocks = task.blocks.filter(date__lte=timezone.localdate())
+    if task.status == Task.DONE:
+        past_blocks.filter(status=TimeBlock.PLANNED).update(status=TimeBlock.DONE)
+    else:
+        past_blocks.filter(status=TimeBlock.DONE).update(status=TimeBlock.PLANNED)
 
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
         return JsonResponse({"success": True, "status": task.status})

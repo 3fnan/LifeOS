@@ -1,0 +1,77 @@
+{% extends "core/base.html" %}
+{% load planner %}
+
+{% block title %}Plan my weeks · LifeGrid{% endblock %}
+
+{% block content %}
+<div class="form-page pg-{{ goal.pigment }}">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="{% url 'goal_detail' goal.id %}">{{ goal.title }}</a></nav>
+
+    <header class="form-head">
+        <h1 class="display">Plan my weeks</h1>
+        <p class="sub">Puts every unfinished task that has no time yet on your calendar, in order, up to {{ goal.target_date|date:"j M Y" }}. It keeps to your plan of {{ goal.daily_minutes|duration }} a day, {{ goal.days_per_week }} day{{ goal.days_per_week|pluralize }} a week, and works around your other blocks.</p>
+    </header>
+
+    <form method="post" class="form" novalidate>
+        {% csrf_token %}
+
+        {% if form.non_field_errors %}
+        <div class="notice notice-error" role="alert">
+            {% for error in form.non_field_errors %}<p class="notice-title">{{ error }}</p>{% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="fields">
+            {% for field in form %}
+            <div class="field field-half{% if field.name == 'window_start' %} field-row-start{% endif %}{% if field.errors %} has-error{% endif %}">
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}<small class="help">{{ field.help_text }}</small>{% endif %}
+                {% for error in field.errors %}<small class="field-error">{{ error }}</small>{% endfor %}
+            </div>
+            {% endfor %}
+        </div>
+
+        {% if plan %}
+        <section class="section" aria-labelledby="preview-heading">
+            <div class="section-head">
+                <h2 id="preview-heading">Preview</h2>
+                {% if plan.blocks %}<p class="section-meta">{{ plan.blocks|length }} block{{ plan.blocks|length|pluralize }} · {{ plan_minutes|duration }}</p>{% endif %}
+            </div>
+
+            {% if plan.unplaced %}
+            <div class="notice notice-warning" role="status">
+                <p class="notice-title">{{ plan.unplaced|length }} task{{ plan.unplaced|length|pluralize:" doesn't,s don't" }} fit before the target date.</p>
+                <ul>{% for task in plan.unplaced %}<li>{{ task.title }}</li>{% endfor %}</ul>
+                <p>Try an earlier start, a wider time window, or a bigger daily budget for the goal.</p>
+            </div>
+            {% endif %}
+
+            {% if plan.blocks %}
+            <ol class="ledger ledger-quiet plan-preview">
+                {% for block in plan.blocks %}
+                <li class="ledger-row">
+                    <span class="ledger-time">{{ block.date|date:"D j M" }}<span>{{ block.start_time|time:"H:i" }}–{{ block.end_time|time:"H:i" }}</span></span>
+                    <span class="ledger-main"><span class="task-name">{{ block.task.title }}</span></span>
+                    <span class="ledger-state"><span class="ledger-len">{{ block.duration_minutes|duration }}</span></span>
+                </li>
+                {% endfor %}
+            </ol>
+            {% elif not plan.unplaced %}
+            <p class="hint">Every unfinished task already has a time on your calendar. Nothing to add.</p>
+            {% endif %}
+        </section>
+        {% endif %}
+
+        <div class="form-actions">
+            {% if plan.blocks %}
+            <button type="submit" name="then" value="save" class="btn btn-primary">Add {{ plan.blocks|length }} block{{ plan.blocks|length|pluralize }} to calendar</button>
+            <button type="submit" class="btn btn-secondary">Preview again</button>
+            {% else %}
+            <button type="submit" class="btn btn-primary">Preview</button>
+            {% endif %}
+            <a href="{% url 'goal_detail' goal.id %}" class="btn btn-quiet">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

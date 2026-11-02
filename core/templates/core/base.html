@@ -13,7 +13,7 @@
             if (savedTheme) document.documentElement.dataset.theme = savedTheme;
         } catch (e) {}
     </script>
-    <link rel="preload" href="{% static 'core/fonts/newsreader-latin.woff2' %}" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="{% static 'core/fonts/geist-latin-wght-normal.woff2' %}" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="{% static 'core/css/style.css' %}">
     <link rel="icon" type="image/svg+xml" href="{% static 'core/favicon.svg' %}">
 </head>
@@ -23,35 +23,55 @@
 
     {% if user.is_authenticated %}
     {% with url_name=request.resolver_match.url_name %}
-    <header class="masthead">
-        <div class="masthead-inner">
-            <a class="wordmark" href="{% url 'dashboard' %}">LifeGrid</a>
+    <div class="app">
+    <aside class="sidebar" aria-label="Sidebar">
+        <a class="brand" href="{% url 'dashboard' %}"><span class="brand-mark" aria-hidden="true">{% include "core/icon.html" with name="layers" size=16 %}</span>LifeGrid</a>
 
-            <nav class="nav" aria-label="Main">
-                <a href="{% url 'dashboard' %}" {% if url_name == 'dashboard' %}aria-current="page"{% endif %}>Today</a>
-                <a href="{% url 'calendar' %}" {% if url_name == 'calendar' %}aria-current="page"{% endif %}>Calendar</a>
-                <a href="{% url 'goal_list' %}" {% if url_name == 'goal_list' or url_name == 'goal_detail' %}aria-current="page"{% endif %}>Goals</a>
-            </nav>
+        <a class="btn btn-primary btn-sm sidebar-new" href="{% url 'create_goal' %}">{% include "core/icon.html" with name="plus" size=16 %}New goal</a>
 
-            <div class="masthead-actions">
-                <a class="btn btn-primary btn-sm hide-narrow" href="{% url 'create_goal' %}">New goal</a>
-                <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch light or dark theme" title="Switch theme">
-                    <span class="only-light">{% include "core/icon.html" with name="moon" %}</span>
-                    <span class="only-dark">{% include "core/icon.html" with name="sun" %}</span>
+        <nav class="side-nav" aria-label="Main">
+            <a href="{% url 'dashboard' %}" {% if url_name == 'dashboard' %}aria-current="page"{% endif %}>{% include "core/icon.html" with name="home" size=16 %}Today</a>
+            <a href="{% url 'calendar' %}" {% if url_name == 'calendar' %}aria-current="page"{% endif %}>{% include "core/icon.html" with name="calendar" size=16 %}Calendar</a>
+            <a href="{% url 'goal_list' %}" {% if url_name == 'goal_list' %}aria-current="page"{% endif %}>{% include "core/icon.html" with name="flag" size=16 %}Goals</a>
+        </nav>
+
+        {% if sidebar_goals %}
+        <nav class="side-goals" aria-labelledby="side-goals-label">
+            <p class="side-label" id="side-goals-label">Active goals</p>
+            {% for side_goal in sidebar_goals %}
+            <a class="pg-{{ side_goal.pigment }}" href="{% url 'goal_detail' side_goal.id %}" {% if goal.id == side_goal.id %}aria-current="page"{% endif %}><span class="swatch" aria-hidden="true"></span><span class="side-goal-title">{{ side_goal.title }}</span></a>
+            {% endfor %}
+        </nav>
+        {% endif %}
+
+        <div class="sidebar-foot">
+            <span class="avatar" aria-hidden="true">{{ user.username|first|upper }}</span>
+            <span class="sidebar-user">{{ user.username }}</span>
+            <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch light or dark theme" title="Switch theme">
+                <span class="only-light">{% include "core/icon.html" with name="moon" size=16 %}</span>
+                <span class="only-dark">{% include "core/icon.html" with name="sun" size=16 %}</span>
+            </button>
+            <form method="post" action="{% url 'logout' %}">
+                {% csrf_token %}
+                <button type="submit" class="icon-btn" aria-label="Log out {{ user.username }}" title="Log out">
+                    {% include "core/icon.html" with name="logout" size=16 %}
                 </button>
-                <form method="post" action="{% url 'logout' %}">
-                    {% csrf_token %}
-                    <button type="submit" class="icon-btn" aria-label="Log out {{ user.username }}" title="Log out">
-                        {% include "core/icon.html" with name="logout" %}
-                    </button>
-                </form>
-            </div>
+            </form>
         </div>
+    </aside>
+
+    <header class="mobile-head">
+        <a class="brand" href="{% url 'dashboard' %}"><span class="brand-mark" aria-hidden="true">{% include "core/icon.html" with name="layers" size=16 %}</span>LifeGrid</a>
+        <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch light or dark theme" title="Switch theme">
+            <span class="only-light">{% include "core/icon.html" with name="moon" size=16 %}</span>
+            <span class="only-dark">{% include "core/icon.html" with name="sun" size=16 %}</span>
+        </button>
     </header>
 
     <main class="page" id="main">
         {% block content %}{% endblock %}
     </main>
+    </div>
 
     <nav class="tabbar" aria-label="Main">
         <a href="{% url 'dashboard' %}" {% if url_name == 'dashboard' %}aria-current="page"{% endif %}>{% include "core/icon.html" with name="home" size=20 %}<span>Today</span></a>

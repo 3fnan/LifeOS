@@ -10,6 +10,8 @@ from django.utils import timezone
 
 from core.forms import GoalForm, TimeBlockForm
 from core.models import Goal, Phase, Step, Task, TimeBlock
+from core import ai_draft, stats
+from core.scheduler import plan_goal
 
 PASSWORD = "test-password-123"
 
@@ -37,6 +39,7 @@ def object_routes(tree):
     """Every URL that reads or changes one user-owned object."""
     return [
         ("goal_detail", tree["goal"].id), ("edit_goal", tree["goal"].id),
+        ("auto_schedule", tree["goal"].id), ("draft_plan", tree["goal"].id),
         ("delete_goal", tree["goal"].id), ("create_phase", tree["goal"].id),
         ("edit_phase", tree["phase"].id), ("delete_phase", tree["phase"].id),
         ("create_step", tree["phase"].id),
@@ -465,13 +468,13 @@ class PageTests(OwnedTreeTestCase):
 
     def test_goal_page_queries_do_not_grow_with_tasks(self):
         url = reverse("goal_detail", args=[self.tree["goal"].id])
-        # session, user, goal, phases, steps, tasks, blocks
-        with self.assertNumQueries(7):
+        # session, user, goal, phases, steps, tasks, blocks, sidebar goals
+        with self.assertNumQueries(8):
             self.client.get(url)
         for i in range(5):
             Task.objects.create(step=self.tree["step"], title=f"Extra {i}")
         Phase.objects.create(goal=self.tree["goal"], title="Another phase", order=2)
-        with self.assertNumQueries(7):
+        with self.assertNumQueries(8):
             self.client.get(url)
 
 
@@ -589,6 +592,272 @@ class UserJourneyTests(TestCase):
 # ---------------------------------------------------------------------------
 # The restructure migration keeps existing data
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Automatic scheduling
+# ---------------------------------------------------------------------------
+# Monday 2 Nov 2026, 08:00 — before the fixture's 09:00 block that day.
+FIXED_NOW = timezone.make_aware(datetime.datetime(2026, 11, 2, 8, 0))
+
+
+class AutoScheduleTests(OwnedTreeTestCase):
+    def add_task(self, title, minutes, step=None):
+        return Task.objects.create(step=step or self.tree["step"], title=title, estimated_minutes=minutes)
+
+    def plan(self, goal=None, start="2026-11-02", window=("18:00", "21:00"), now=FIXED_NOW):
+        return plan_goal(
+            Goal.objects.get(pk=(goal or self.tree["goal"]).pk),
+            start_date=datetime.date.fromisoformat(start),
+            window_start=datetime.time.fromisoformat(window[0]),
+            window_end=datetime.time.fromisoformat(window[1]),
+            now=now,
+        )
+
+    @staticmethod
+    def summary(plan):
+        return [(b.task.title, str(b.date), f"{b.start_time:%H:%M}", f"{b.end_time:%H:%M}") for b in plan.blocks]
+
+    def test_keeps_order_and_daily_budget_without_splitting_short_tasks(self):
+        self.add_task("A", 45)
+        self.add_task("B", 45)
+        plan = self.plan()
+        # Monday is already full (the fixture's 60-minute block); the original
+        # task is scheduled, so only A and B are planned. B doesn't fit in
+        # Tuesday's last 15 minutes, so it moves whole to Wednesday.
+        self.assertEqual(self.summary(plan), [
+            ("A", "2026-11-03", "18:00", "18:45"),
+            ("B", "2026-11-04", "18:00", "18:45"),
+        ])
+        self.assertEqual(plan.unplaced, [])
+        self.assertEqual(TimeBlock.objects.count(), 1)  # nothing saved
+
+    def test_splits_tasks_longer_than_a_day_into_daily_pieces(self):
+        self.add_task("Long", 150)
+        self.assertEqual(self.summary(self.plan()), [
+            ("Long", "2026-11-03", "18:00", "19:00"),
+            ("Long", "2026-11-04", "18:00", "19:00"),
+            ("Long", "2026-11-05", "18:00", "18:30"),
+        ])
+
+    def test_whole_task_waits_for_a_gap_big_enough(self):
+        other_goal = make_tree(self.owner, title="Other goal")
+        TimeBlock.objects.filter(task=other_goal["task"]).update(date="2026-11-03", start_time="18:20", end_time="19:00")
+        self.add_task("A", 45)
+        self.assertEqual(self.summary(self.plan()), [("A", "2026-11-03", "19:00", "19:45")])
+
+    def test_respects_days_per_week(self):
+        goal = self.tree["goal"]
+        goal.days_per_week = 2
+        goal.save()
+        for title in "ABC":
+            self.add_task(title, 60)
+        # Monday already counts as one of this week's two days.
+        self.assertEqual([d for _, d, _, _ in self.summary(self.plan())],
+                         ["2026-11-03", "2026-11-09", "2026-11-10"])
+
+    def test_works_around_other_blocks(self):
+        other_goal = make_tree(self.owner, title="Other goal")
+        TimeBlock.objects.filter(task=other_goal["task"]).update(date="2026-11-03", start_time="18:00", end_time="18:30")
+        overlap_ok = TimeBlock.objects.create(task=other_goal["task"], date="2026-11-03",
+                                              start_time="18:30", end_time="21:00", allow_overlap=True)
+        self.add_task("A", 60)
+        self.assertEqual(self.summary(self.plan()), [("A", "2026-11-03", "18:30", "19:30")])
+        overlap_ok.delete()
+
+    def test_reschedules_missed_and_skips_done_tasks(self):
+        self.tree["block"].date = "2026-10-30"  # in the past, still planned -> missed
+        self.tree["block"].save()
+        Task.objects.create(step=self.tree["step"], title="Done already", status=Task.DONE)
+        titles = [t for t, *_ in self.summary(self.plan())]
+        self.assertEqual(titles, ["Task"])
+
+    def test_reports_tasks_that_do_not_fit_before_target_date(self):
+        goal = self.tree["goal"]
+        goal.target_date = datetime.date(2026, 11, 3)
+        goal.save()
+        self.add_task("A", 60)
+        self.add_task("B", 60)
+        plan = self.plan()
+        self.assertEqual([t for t, *_ in self.summary(plan)], ["A"])
+        self.assertEqual([t.title for t in plan.unplaced], ["B"])
+
+    def test_nothing_is_placed_in_the_past_today(self):
+        self.tree["block"].delete()
+        self.add_task("A", 30)
+        now = timezone.make_aware(datetime.datetime(2026, 11, 2, 19, 2))
+        plan = self.plan(now=now)
+        self.assertEqual(self.summary(plan)[0], ("Task", "2026-11-02", "19:05", "19:35"))
+
+    @mock.patch("django.utils.timezone.now", return_value=FIXED_NOW)
+    def test_preview_then_save(self, _now):
+        self.add_task("A", 45)
+        url = reverse("auto_schedule", args=[self.tree["goal"].id])
+        data = {"start_date": "2026-11-02", "window_start": "18:00", "window_end": "21:00"}
+
+        self.assertContains(self.client.get(url), "Plan my weeks")
+        preview = self.client.post(url, data)
+        self.assertContains(preview, "Add 1 block to calendar")
+        self.assertEqual(TimeBlock.objects.count(), 1)
+
+        response = self.client.post(url, dict(data, then="save"))
+        self.assertRedirects(response, reverse("goal_detail", args=[self.tree["goal"].id]))
+        block = TimeBlock.objects.get(task__title="A")
+        self.assertEqual((str(block.date), f"{block.start_time:%H:%M}"), ("2026-11-03", "18:00"))
+
+    @mock.patch("django.utils.timezone.now", return_value=FIXED_NOW)
+    def test_form_rejects_bad_window_and_dates(self, _now):
+        url = reverse("auto_schedule", args=[self.tree["goal"].id])
+        cases = [
+            ({"start_date": "2026-11-02", "window_start": "21:00", "window_end": "18:00"}, "latest finish must be later"),
+            ({"start_date": "2026-11-01", "window_start": "18:00", "window_end": "21:00"}, "today or a later date"),
+            ({"start_date": "2027-01-01", "window_start": "18:00", "window_end": "21:00"}, "target date is 10 Dec 2026"),
+        ]
+        for data, message in cases:
+            with self.subTest(message=message):
+                self.assertContains(self.client.post(url, dict(data, then="save")), message)
+        self.assertEqual(TimeBlock.objects.count(), 1)
+
+
+class DraftPlanTests(OwnedTreeTestCase):
+    PHASES = [{"title": "Basics", "steps": [
+        {"title": "Models", "tasks": [{"title": "Read the docs", "minutes": 45}, {"title": "Build one", "minutes": 60}]},
+    ]}]
+
+    def url(self):
+        return reverse("draft_plan", args=[self.tree["goal"].id])
+
+    def test_outline_round_trip(self):
+        phases, errors = ai_draft.parse_outline(ai_draft.to_outline(self.PHASES))
+        self.assertEqual(errors, [])
+        self.assertEqual(phases, self.PHASES)
+
+    def test_outline_defaults_minutes_and_reports_bad_lines(self):
+        phases, errors = ai_draft.parse_outline("# P\n## S\n- No time given\n")
+        self.assertEqual(phases[0]["steps"][0]["tasks"], [{"title": "No time given", "minutes": 30}])
+        _, errors = ai_draft.parse_outline("- orphan task\njust text\n")
+        self.assertEqual(len(errors), 2)
+        self.assertIn("Line 1", errors[0])
+
+    @mock.patch("core.ai_draft.draft_plan", return_value=PHASES)
+    def test_draft_shows_editable_outline_and_saves_nothing(self, draft):
+        before = self.counts()
+        response = self.client.post(self.url(), {"level": "beginner"})
+        self.assertContains(response, "## Models")
+        self.assertContains(response, "- Read the docs (45 min)")
+        self.assertEqual(self.counts(), before)
+        draft.assert_called_once()
+
+    def test_save_appends_edited_outline_after_existing_phases(self):
+        outline = "# Basics\n## Models\n- Read the docs (45 min)\n- Build one (1 hour typo)\n"
+        response = self.client.post(self.url(), {"level": "beginner", "outline": outline, "then": "save"})
+        self.assertEqual(response.status_code, 302)
+        phase = Phase.objects.get(title="Basics")
+        self.assertEqual(phase.goal, self.tree["goal"])
+        self.assertEqual(phase.order, 2)
+        tasks = Task.objects.filter(step__phase=phase).order_by("id")
+        self.assertEqual([(t.title, t.estimated_minutes) for t in tasks],
+                         [("Read the docs", 45), ("Build one (1 hour typo)", 30)])
+
+    def test_invalid_outline_is_not_saved(self):
+        before = self.counts()
+        response = self.client.post(self.url(), {"level": "beginner", "outline": "- orphan\n", "then": "save"})
+        self.assertContains(response, "Fix the draft")
+        self.assertEqual(self.counts(), before)
+
+    @mock.patch.dict("os.environ", {}, clear=True)
+    def test_missing_key_shows_error_with_manual_fallback(self):
+        response = self.client.post(self.url(), {"level": "beginner"})
+        self.assertContains(response, "AI drafting isn&#x27;t available right now.")
+        self.assertNotContains(response, "Gemini")
+        self.assertContains(response, reverse("create_phase", args=[self.tree["goal"].id]))
+
+    @mock.patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"})
+    def test_busy_model_falls_back_to_next_and_sends_only_goal_info(self):
+        import io, json, urllib.error
+        body = {"candidates": [{"content": {"parts": [{"text": json.dumps({"phases": self.PHASES})}]}}]}
+        busy = urllib.error.HTTPError("u", 503, "busy", {}, io.BytesIO(b"{}"))
+        ok = mock.MagicMock()
+        ok.__enter__.return_value = io.BytesIO(json.dumps(body).encode())
+        with mock.patch("urllib.request.urlopen", side_effect=[busy, ok]) as urlopen:
+            phases = ai_draft.draft_plan(Goal.objects.get(pk=self.tree["goal"].pk), "some")
+        self.assertEqual(phases, self.PHASES)
+        first, second = (call.args[0] for call in urlopen.call_args_list)
+        self.assertIn(ai_draft.MODELS[0], first.full_url)
+        self.assertIn(ai_draft.MODELS[1], second.full_url)
+        prompt = json.loads(second.data)["contents"][0]["parts"][0]["text"]
+        self.assertIn("Learn Django", prompt)
+        self.assertNotIn(self.owner.username, prompt)
+
+
+class DashboardStatsTests(OwnedTreeTestCase):
+    TODAY = datetime.date(2026, 11, 4)  # a Wednesday
+
+    def block(self, date, status="planned", start="09:00", end="10:00", task=None):
+        return TimeBlock.objects.create(task=task or self.tree["task"], date=date,
+                                        start_time=start, end_time=end, status=status)
+
+    def setUp(self):
+        super().setUp()
+        self.tree["block"].delete()
+
+    def test_streak_counts_done_days_and_skips_rest_days(self):
+        self.block("2026-11-04", "planned")   # today, not done yet: doesn't break
+        self.block("2026-11-03", "done")
+        # 2026-11-02 has nothing planned: a rest day
+        self.block("2026-11-01", "done")
+        self.block("2026-10-31", "skipped")    # breaks the streak
+        self.block("2026-10-30", "done")
+        self.assertEqual(stats.streak(self.owner, self.TODAY), 2)
+
+    def test_streak_includes_today_once_done(self):
+        self.block("2026-11-04", "done")
+        self.block("2026-11-03", "done")
+        self.assertEqual(stats.streak(self.owner, self.TODAY), 2)
+
+    def test_week_hours_count_only_done_blocks_this_week(self):
+        self.block("2026-11-02", "done", "09:00", "10:30")
+        self.block("2026-11-03", "planned")
+        self.block("2026-10-30", "done")  # last week
+        week = stats.week_hours(self.owner, self.TODAY)
+        self.assertEqual(week["done"], 90)
+        self.assertEqual(week["budget"], 60 * 5)
+
+    def test_goal_at_risk_when_work_exceeds_time_left(self):
+        goal = self.tree["goal"]  # 1h a day, 5 days a week, target 2026-12-10
+        self.assertEqual(stats.goals_at_risk(self.owner, self.TODAY), [])
+        Task.objects.create(step=self.tree["step"], title="Huge", estimated_minutes=60 * 60)
+        [risk] = stats.goals_at_risk(self.owner, self.TODAY)
+        self.assertEqual(risk["goal"], goal)
+        self.assertGreater(risk["short"], 0)
+
+    @mock.patch("django.utils.timezone.now",
+                return_value=timezone.make_aware(datetime.datetime(2026, 11, 4, 12, 0)))
+    def test_skipped_and_missed_this_week(self, _now):
+        skipped = self.block("2026-11-02", "skipped")
+        missed = self.block("2026-11-03", "planned")
+        self.block("2026-11-03", "done", "11:00", "12:00")
+        self.block("2026-10-30", "skipped")  # last week
+        self.assertEqual(stats.skipped_and_missed(self.owner, self.TODAY), [skipped, missed])
+
+    def test_ticking_a_task_marks_its_past_blocks_done_and_unticking_reverts(self):
+        today = timezone.localdate()
+        past = self.block(today)
+        future = self.block(today + datetime.timedelta(days=3))
+        url = reverse("toggle_task", args=[self.tree["task"].id])
+        self.client.post(url)
+        past.refresh_from_db(); future.refresh_from_db()
+        self.assertEqual((past.status, future.status), ("done", "planned"))
+        self.client.post(url)
+        past.refresh_from_db()
+        self.assertEqual(past.status, "planned")
+
+    def test_dashboard_shows_stats(self):
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, "Streak")
+        self.assertContains(response, "This week")
+        self.assertContains(response, "At risk")
+        self.assertContains(response, "Skipped or missed")
+
+
 class RestructureMigrationTests(TransactionTestCase):
     before = [("core", "0005_remove_goal_goal_type_goal_category_and_more")]
     after = [("core", "0008_new_statuses_and_overlap")]
